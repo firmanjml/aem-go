@@ -141,8 +141,8 @@ Add these ENV into PATH
 - %AEM_NODE_SYMLINK%
 - %AEM_JAVA_SYMLINK%
 - %AEM_JAVA_SYMLINK%\bin
-
-![Editing Env Path](./images/env.png)
+- 
+![Editing Env Path](https://github.com/user-attachments/assets/2305fe63-b2c3-42d2-82d3-9f6d8ad9969f)
 
 ---
 
@@ -184,16 +184,10 @@ The motivation behind AEM is twofold:
 
 ## Contact
 
-Created by \[Your Name]
+Created by firmajml
 Feel free to reach out or create issues for any bugs, suggestions, or questions.
 
 ---
 
 Thank you for using Adaptive Environment Manager! 🚀
 
-```
-
----
-
-If you want, I can also help you generate a `CONTRIBUTING.md` or example config files! Would you like that?
-```
