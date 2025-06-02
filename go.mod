@@ -1,4 +1,4 @@
-module github.com/firmanjml/aem-client-go
+module aem
 
 go 1.24.3
 
