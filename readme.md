@@ -19,6 +19,8 @@ https://github.com/user-attachments/assets/df05cc1b-31c7-49d9-b70b-e574b5182a39
 - [Usage](#usage)  
 - [Configuration](#configuration)  
 - [Contribution](#contribution)  
+- [Motivation](#motivation)
+- [Future Plans](#future-plans)
 - [Contact](#contact)
 
 ---
@@ -174,11 +176,9 @@ The motivation behind AEM is twofold:
 
 ## Future Plans
 
-* Add support for other runtimes and SDKs (e.g., Python, Ruby, Flutter SDK)
-* Integration with CI/CD pipelines for automated environment provisioning
+* Integration with CI/CD pipelines for project building
 * Enhanced configuration management with environment profiles
 * Better cross-platform installers and package manager support
-* GUI or web dashboard for managing environments visually
 
 ---
 
