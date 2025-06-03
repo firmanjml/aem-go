@@ -119,8 +119,8 @@ Run `aem` with commands to manage your environment:
 # Install Android SDK components
 ./aem android install
 
-# View current environment status
-./aem status
+# Setup environment by retrieving configuration from aem.json
+./aem setup
 ```
 
 > **Note:** Commands and flags may evolve; run `./aem --help` for the latest usage information.
@@ -145,6 +145,19 @@ Add these ENV into PATH
 - %AEM_JAVA_SYMLINK%\bin
 - 
 ![Editing Env Path](https://github.com/user-attachments/assets/2305fe63-b2c3-42d2-82d3-9f6d8ad9969f)
+
+Example of aem.json
+```
+{
+  "node": "16.20.2",
+  "jdk": "17.0.15",
+  "android": {
+    "sdk": "",
+    "ndk": "",
+    "build-tool": ""
+  }
+}
+```
 
 ---
 
