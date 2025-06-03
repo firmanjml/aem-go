@@ -20,8 +20,8 @@ var javaCmd = &cobra.Command{
 }
 
 func init() {
-	useCmd := &cobra.Command{
-		Use:   "use [major version]",
+	installCmd := &cobra.Command{
+		Use:   "install [major version]",
 		Short: "Use a specific major version of JDK",
 		Args:  cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
@@ -31,13 +31,24 @@ func init() {
 
 			if _, err := os.Stat(versionPath); err == nil {
 				fmt.Println("[INFO] Version", input, "already exists. Skipping download.")
-			} else {
-				extractedPath, err := java.DownloadAndExtractJDK(input)
-				if err != nil {
-					log.Fatalf("Failed: %v", err)
-				}
-				versionPath = extractedPath
 			}
+
+			_, err := java.DownloadAndExtractJDK(input)
+			if err != nil {
+				log.Fatalf("Failed: %v", err)
+			}
+
+			fmt.Println("[DEBUG] Version", input, "installed.")
+		},
+	}
+
+	useCmd := &cobra.Command{
+		Use:   "use [major version]",
+		Short: "Use a specific major version of JDK",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			input := args[0]
+			versionPath := filepath.Join("sys_installed", "java", input)
 
 			link := os.Getenv("AEM_JAVA_SYMLINK")
 			target, err := filepath.Abs(versionPath)
@@ -53,5 +64,32 @@ func init() {
 		},
 	}
 
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List installed java",
+		Run: func(cmd *cobra.Command, args []string) {
+			versionPath := filepath.Join("sys_installed", "java")
+
+			if err := os.MkdirAll(versionPath, os.ModePerm); err != nil {
+				log.Fatal(err)
+			}
+
+			entries, err := os.ReadDir(versionPath)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if len(entries) == 0 {
+				fmt.Println("No jdk installed")
+			}
+
+			for _, e := range entries {
+				fmt.Println(e.Name())
+			}
+		},
+	}
+
+	javaCmd.AddCommand(installCmd)
 	javaCmd.AddCommand(useCmd)
+	javaCmd.AddCommand(listCmd)
 }

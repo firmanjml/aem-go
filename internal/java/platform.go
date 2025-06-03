@@ -40,40 +40,6 @@ func DownloadAndExtractJDK(javaVersion string) (string, error) {
 		target = "aarch64"
 	case "armbe":
 		target = "aarch32"
-	case "loong64":
-		target = "loong64"
-	case "mips":
-		target = "mips"
-	case "mips64":
-		target = "mips64"
-	case "mips64le":
-		target = "mips64le"
-	case "mips64p32":
-		target = "mips64p32"
-	case "mips64p32le":
-		target = "mips64p32le"
-	case "mipsle":
-		target = "mipsle"
-	case "ppc":
-		target = "ppc32"
-	case "ppc64":
-		target = "ppc64"
-	case "ppc64le":
-		target = "ppc64le"
-	case "riscv":
-		target = "riscv"
-	case "riscv64":
-		target = "riscv64"
-	case "s390":
-		target = "s390"
-	case "s390x":
-		target = "s390x"
-	case "sparc":
-		target = "sparc32"
-	case "sparc64":
-		target = "sparc64"
-	case "wasm":
-		target = "wasm"
 	}
 
 	api := fmt.Sprintf("https://api.azul.com/metadata/v1/zulu/packages/?java_version=%s&arch=%s&os=%s&archive_type=zip&java_package_type=jdk", javaVersion, target, goos)

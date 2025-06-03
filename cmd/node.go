@@ -30,33 +30,7 @@ func init() {
 				input = "v" + input
 			}
 
-			versions := node.GetVersions()
-
-			var matched []string
-			for _, v := range versions {
-				if strings.HasPrefix(v, input) {
-					matched = append(matched, v)
-				}
-			}
-
-			if len(matched) == 0 {
-				fmt.Printf("No versions found for Node.js major version %s\n", input)
-				return
-			}
-
-			latest := matched[len(matched)-1]
-			versionPath := filepath.Join("sys_installed", "node", latest)
-
-			if _, err := os.Stat(versionPath); err == nil {
-				fmt.Println("[INFO] Version", latest, "already exists. Skipping download.")
-			} else {
-				downloadUrl := node.DownloadURL(latest)
-				extractedPath, err := node.DownloadAndExtractZip(downloadUrl, latest)
-				if err != nil {
-					log.Fatalf("Failed: %v", err)
-				}
-				versionPath = extractedPath
-			}
+			versionPath := filepath.Join("sys_installed", "node", input)
 
 			link := os.Getenv("AEM_NODE_SYMLINK")
 			target, err := filepath.Abs(versionPath)
@@ -72,5 +46,66 @@ func init() {
 		},
 	}
 
+	installCmd := &cobra.Command{
+		Use:   "install [major version]",
+		Short: "Use a specific major version of Node.js",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			input := args[0]
+			if !strings.HasPrefix(input, "v") {
+				input = "v" + input
+			}
+
+			versions := node.GetVersions()
+
+			var matched []string
+			for _, v := range versions {
+				if strings.HasPrefix(v, input) {
+					matched = append(matched, v)
+				}
+			}
+
+			if len(matched) == 0 {
+				fmt.Printf("No versions found for Node.js major version %s\n", input)
+				return
+			}
+
+			latest := matched[len(matched)-1]
+
+			downloadUrl := node.DownloadURL(latest)
+			_, err := node.DownloadAndExtractZip(downloadUrl, latest)
+			if err != nil {
+				log.Fatalf("Failed: %v", err)
+			}
+		},
+	}
+
+	listCmd := &cobra.Command{
+		Use:   "list",
+		Short: "List installed node.js",
+		Run: func(cmd *cobra.Command, args []string) {
+			versionPath := filepath.Join("sys_installed", "node")
+
+			if err := os.MkdirAll(versionPath, os.ModePerm); err != nil {
+				log.Fatal(err)
+			}
+
+			entries, err := os.ReadDir(versionPath)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if len(entries) == 0 {
+				fmt.Println("No node.js installed")
+			}
+
+			for _, e := range entries {
+				fmt.Println(e.Name())
+			}
+		},
+	}
+
+	nodeCmd.AddCommand(installCmd)
 	nodeCmd.AddCommand(useCmd)
+	nodeCmd.AddCommand(listCmd)
 }
