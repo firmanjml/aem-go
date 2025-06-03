@@ -8,6 +8,7 @@ import (
 	"aem/pkg/logger"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -16,7 +17,7 @@ import (
 var (
 	debug      bool
 	log        *logger.Logger
-	installDir = "sys_installed"
+	installDir = filepath.Join(os.Getenv("AEM_HOME"), "sys_installed")
 )
 
 var rootCmd = &cobra.Command{
