@@ -102,31 +102,37 @@ Run `aem` with commands to manage your environment:
 
 ```bash
 # Show help and available commands
-./aem --help
+aem --help
 
 # Install a specific Node.js version
-./aem node install 16.14.0
+aem node install 16.14.0
 
 # List installed Node.js versions
-./aem node list
+aem node list
 
 # Use a specific Node.js version for your project
-./aem node use 16.14.0
+aem node use 16.14.0
+
+# Remove installed Node.js versions
+aem node remove 16.14.0
 
 # Install a Java JDK version via Azul Zulu API
-./aem java install 11.0.15
+aem java install 11.0.15
 
 # List installed Java versions
-./aem java list
+aem java list
+
+# Remove installed Java versions
+aem java remove 11.0.15
 
 # Install Android SDK components
-./aem android install
+aem android install
 
 # Setup environment by retrieving configuration from aem.json
-./aem setup
+aem setup
 ```
 
-> **Note:** Commands and flags may evolve; run `./aem --help` for the latest usage information.
+> **Note:** Commands and flags may evolve; run `aem --help` for the latest usage information.
 
 ---
 
@@ -146,7 +152,7 @@ Add these ENV into PATH
 - %AEM_NODE_SYMLINK%
 - %AEM_JAVA_SYMLINK%
 - %AEM_JAVA_SYMLINK%\bin
-- 
+
 ![Editing Env Path](https://github.com/user-attachments/assets/2305fe63-b2c3-42d2-82d3-9f6d8ad9969f)
 
 Example of aem.json
