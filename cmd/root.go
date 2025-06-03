@@ -103,9 +103,24 @@ func newJavaCmd() *cobra.Command {
 		},
 	}
 
+	currentCmd := &cobra.Command{
+		Use:   "current",
+		Short: "List the current JDK versions",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			javaService := java.NewService(log, installDir)
+			version, err := javaService.GetCurrentJDKVersion()
+			if err != nil {
+				return err
+			}
+			fmt.Println("*  " + version)
+			return nil
+		},
+	}
+
 	javaCmd.AddCommand(installCmd)
 	javaCmd.AddCommand(useCmd)
 	javaCmd.AddCommand(listCmd)
+	javaCmd.AddCommand(currentCmd)
 
 	return javaCmd
 }
@@ -163,9 +178,24 @@ func newNodeCmd() *cobra.Command {
 		},
 	}
 
+	currentCmd := &cobra.Command{
+		Use:   "current",
+		Short: "List the current NodeJS versions",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeService := node.NewService(log, installDir)
+			version, err := nodeService.GetCurrentNodeVersion()
+			if err != nil {
+				return err
+			}
+			fmt.Println("*  " + version)
+			return nil
+		},
+	}
+
 	nodeCmd.AddCommand(installCmd)
 	nodeCmd.AddCommand(useCmd)
 	nodeCmd.AddCommand(listCmd)
+	nodeCmd.AddCommand(currentCmd)
 
 	return nodeCmd
 

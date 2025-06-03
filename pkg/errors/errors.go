@@ -27,6 +27,10 @@ func NewFileSystemError(message string, cause error) *AEMError {
 	return &AEMError{Type: "FILESYSTEM_ERROR", Message: message, Cause: cause}
 }
 
+func FileWriteSystemError(message string, cause error) *AEMError {
+	return &AEMError{Type: "FILE_WRITE_ERROR", Message: message, Cause: cause}
+}
+
 func NewAPIError(message string, cause error) *AEMError {
 	return &AEMError{Type: "API_ERROR", Message: message, Cause: cause}
 }

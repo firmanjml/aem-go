@@ -7,6 +7,7 @@ import (
 	"aem/pkg/errors"
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -116,10 +117,23 @@ func (s *Service) List() ([]string, error) {
 		return nil, err
 	}
 
+	nodeVersion := ""
+	data, err := os.ReadFile("node.txt")
+	if err == nil {
+		nodeVersion = strings.TrimSpace(string(data))
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
 	var versions []string
 	for _, entry := range entries {
 		if entry.IsDir() {
-			versions = append(versions, entry.Name())
+			version := entry.Name()
+			prefix := "   "
+			if version == nodeVersion {
+				prefix = "*  "
+			}
+			versions = append(versions, prefix+version)
 		}
 	}
 
@@ -254,4 +268,18 @@ func (s *Service) downloadAndInstall(url, version string) error {
 	// Move to final location
 	s.fs.RemoveAll(finalPath) // Remove if exists
 	return s.fs.Move(extractedRoot, finalPath)
+}
+
+func (s *Service) GetCurrentNodeVersion() (string, error) {
+	s.logger.Debug("Fetching Node.js current environment versions")
+
+	data, err := os.ReadFile("node.txt")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "no current version", nil
+		}
+		return "", errors.NewFileSystemError("failed to read node setting", err)
+	}
+
+	return string(data), nil
 }

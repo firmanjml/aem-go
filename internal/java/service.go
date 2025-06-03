@@ -9,6 +9,7 @@ import (
 	"aem/pkg/logger"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -108,10 +109,23 @@ func (s *Service) List() ([]string, error) {
 		return nil, err
 	}
 
+	jdkVersion := ""
+	data, err := os.ReadFile("java.txt")
+	if err == nil {
+		jdkVersion = strings.TrimSpace(string(data))
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+
 	var versions []string
 	for _, entry := range entries {
 		if entry.IsDir() {
-			versions = append(versions, entry.Name())
+			version := entry.Name()
+			prefix := "   "
+			if version == jdkVersion {
+				prefix = "*  "
+			}
+			versions = append(versions, prefix+version)
 		}
 	}
 
@@ -189,4 +203,18 @@ func (s *Service) createVersionString(javaVersion []int) string {
 		parts[i] = strconv.Itoa(v)
 	}
 	return strings.Join(parts, ".")
+}
+
+func (s *Service) GetCurrentJDKVersion() (string, error) {
+	s.logger.Debug("Fetching JDK current environment versions")
+
+	data, err := os.ReadFile("java.txt")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "no current version", nil
+		}
+		return "", errors.NewFileSystemError("failed to read JDK setting", err)
+	}
+
+	return string(data), nil
 }

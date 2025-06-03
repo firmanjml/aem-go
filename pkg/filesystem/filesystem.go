@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 type FileSystem struct {
@@ -61,12 +62,28 @@ func (fs *FileSystem) CreateSymlink(link, target string) error {
 		return errors.NewFileSystemError("failed to get absolute path", err)
 	}
 
+	pathParts := strings.Split(target, "\\")
+	var module, version string
+
+	if len(pathParts) >= 3 {
+		module = pathParts[1]
+		version = pathParts[2]
+	} else {
+		errors.NewFileSystemError("Unexpected format", nil)
+	}
+
 	// Create symlink
 	if err := os.Symlink(absTarget, link); err != nil {
 		if runtime.GOOS == "windows" {
 			return errors.NewFileSystemError("failed to create symlink (may need administrator privileges on Windows)", err)
 		}
 		return errors.NewFileSystemError("failed to create symlink", err)
+	} else {
+		// Write version settings
+		data := []byte(version)
+		if err := os.WriteFile(module+".txt", data, 0644); err != nil {
+			errors.FileWriteSystemError("failed to write "+module+" setting", err)
+		}
 	}
 
 	return nil
