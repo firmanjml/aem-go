@@ -39,14 +39,14 @@ func NewService(logger *logger.Logger, installDir string) *Service {
 	}
 }
 
-func (s *Service) Install(majorVersion string) error {
+func (s *Service) Install(majorVersion string) (string, error) {
 	s.logger.Info("Installing JDK version: %s", majorVersion)
 
 	// Check if already installed
 	versionPath := filepath.Join(s.installDir, "java", "v"+majorVersion)
 	if s.fs.Exists(versionPath) {
 		s.logger.Info("JDK version %s already installed", majorVersion)
-		return nil
+		return "", nil
 	}
 
 	// Get platform info
@@ -55,11 +55,11 @@ func (s *Service) Install(majorVersion string) error {
 	// Fetch available packages
 	packages, err := s.fetchPackages(majorVersion, platform)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if len(packages) == 0 {
-		return errors.NewValidationError("no JDK packages found for version " + majorVersion)
+		return "", errors.NewValidationError("no JDK packages found for version " + majorVersion)
 	}
 
 	pkg := packages[0]
@@ -70,11 +70,11 @@ func (s *Service) Install(majorVersion string) error {
 
 	// Download and install
 	if err := s.downloadAndInstall(pkg, finalPath); err != nil {
-		return err
+		return "", err
 	}
 
 	s.logger.Info("Successfully installed JDK version: %s", versionStr)
-	return nil
+	return versionStr, nil
 }
 
 func (s *Service) Use(version string, symlinkPath string) error {
@@ -155,7 +155,14 @@ func (s *Service) fetchPackages(javaVersion string, platform platform.Info) ([]A
 }
 
 func (s *Service) downloadAndInstall(pkg AzulPackage, finalPath string) error {
-	tmpDir := "tmp"
+	execPath, err := os.Executable()
+	if err != nil {
+		return errors.NewExtractionError("failed to get executable path: %w", err)
+	}
+
+	baseDir := filepath.Dir(execPath)
+	tmpDir := filepath.Join(baseDir, "tmp")
+
 	zipPath := filepath.Join(tmpDir, pkg.Name)
 	extractDir := filepath.Join(tmpDir, "jdk_extract")
 

@@ -33,3 +33,6 @@ go.work.sum
 
 tmp
 sys_installed
+node.txt
+java.txt
+aem.json

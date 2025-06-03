@@ -35,7 +35,7 @@ func NewService(logger *logger.Logger, installDir string) *Service {
 	}
 }
 
-func (s *Service) Install(majorVersion string) error {
+func (s *Service) Install(majorVersion string) (string, error) {
 	s.logger.Info("Installing Node.js version: %s", majorVersion)
 
 	// Normalize version format
@@ -46,7 +46,7 @@ func (s *Service) Install(majorVersion string) error {
 	// Get available versions
 	versions, err := s.GetVersions()
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Find matching versions
@@ -58,7 +58,7 @@ func (s *Service) Install(majorVersion string) error {
 	}
 
 	if len(matched) == 0 {
-		return errors.NewValidationError("no Node.js versions found for major version: " + majorVersion)
+		return "", errors.NewValidationError("no Node.js versions found for major version: " + majorVersion)
 	}
 
 	// Use latest version
@@ -69,21 +69,21 @@ func (s *Service) Install(majorVersion string) error {
 	versionPath := filepath.Join(s.installDir, "node", latest)
 	if s.fs.Exists(versionPath) {
 		s.logger.Info("Node.js version %s already installed", latest)
-		return nil
+		return "", nil
 	}
 
 	// Download and install
 	downloadURL, err := s.getDownloadURL(latest)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	if err := s.downloadAndInstall(downloadURL, strings.TrimPrefix(latest, "v")); err != nil {
-		return err
+		return "", err
 	}
 
 	s.logger.Info("Successfully installed Node.js version: %s", latest)
-	return nil
+	return strings.TrimPrefix(latest, "v"), nil
 }
 
 func (s *Service) Use(version string, symlinkPath string) error {
@@ -227,7 +227,14 @@ func (s *Service) getDownloadURL(version string) (string, error) {
 }
 
 func (s *Service) downloadAndInstall(url, version string) error {
-	tmpDir := "tmp"
+	execPath, err := os.Executable()
+	if err != nil {
+		return errors.NewExtractionError("failed to get executable path: %w", err)
+	}
+
+	baseDir := filepath.Dir(execPath)
+	tmpDir := filepath.Join(baseDir, "tmp")
+
 	fileName := filepath.Base(url)
 	zipPath := filepath.Join(tmpDir, fileName)
 	extractDir := filepath.Join(tmpDir, "node_extract")

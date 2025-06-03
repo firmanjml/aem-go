@@ -4,6 +4,7 @@ import (
 	"aem/assets"
 	"aem/internal/java"
 	"aem/internal/node"
+	"aem/internal/setup"
 	"aem/pkg/logger"
 	"fmt"
 	"os"
@@ -37,7 +38,7 @@ var rootCmd = &cobra.Command{
 func Execute() {
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "enable verbose mode")
 
-	// rootCmd.AddCommand(newSetupCmd())
+	rootCmd.AddCommand(newSetupCmd())
 	rootCmd.AddCommand(newNodeCmd())
 	rootCmd.AddCommand(newJavaCmd())
 
@@ -66,7 +67,8 @@ func newJavaCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			javaService := java.NewService(log, installDir)
-			return javaService.Install(args[0])
+			_, err := javaService.Install(args[0])
+			return err
 		},
 	}
 
@@ -160,7 +162,8 @@ func newNodeCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeService := node.NewService(log, installDir)
-			return nodeService.Install(args[0])
+			_, err := nodeService.Install(args[0])
+			return err
 		},
 	}
 
@@ -237,4 +240,17 @@ func newNodeCmd() *cobra.Command {
 
 	return nodeCmd
 
+}
+
+func newSetupCmd() *cobra.Command {
+	setupCmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Setup development environment from aem.json",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			setupService := setup.NewService(log, installDir)
+			return setupService.Setup()
+		},
+	}
+
+	return setupCmd
 }
