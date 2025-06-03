@@ -5,7 +5,9 @@ Adaptive Environment Manager (AEM) is a powerful tool designed to simplify and a
 By automating the setup and version management of essential SDKs and runtimes, AEM enables developers to focus more on coding and less on environment configuration — accelerating project setup and boosting productivity.
 
 
-https://github.com/user-attachments/assets/df05cc1b-31c7-49d9-b70b-e574b5182a39
+
+https://github.com/user-attachments/assets/3c0c3acb-6317-408e-b37e-75eba5ea69b5
+
 
 
 ---
