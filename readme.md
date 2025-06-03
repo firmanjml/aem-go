@@ -1,4 +1,5 @@
 # Adaptive Environment Manager (AEM) [WORK IN PROGRESS 🏗️]
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/firmanjml/aem-go)
 
 Adaptive Environment Manager (AEM) is a powerful tool designed to simplify and automate the management of development environment dependencies, such as Node.js, Java, and Android SDK. AEM is especially tailored for developers working with frameworks like React Native, where managing multiple versions of these tools can become cumbersome and time-consuming.
 
