@@ -71,9 +71,10 @@ func newJavaCmd() *cobra.Command {
 	}
 
 	useCmd := &cobra.Command{
-		Use:   "use [version]",
-		Short: "Use a specific version of JDK",
-		Args:  cobra.ExactArgs(1),
+		Use:     "use [version]",
+		Short:   "Use a specific version of JDK",
+		Aliases: []string{"set"},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			javaService := java.NewService(log, installDir)
 			symlinkPath := os.Getenv("AEM_JAVA_SYMLINK")
@@ -82,8 +83,9 @@ func newJavaCmd() *cobra.Command {
 	}
 
 	listCmd := &cobra.Command{
-		Use:   "list",
-		Short: "List installed JDK versions",
+		Use:     "list",
+		Short:   "List installed JDK versions",
+		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			javaService := java.NewService(log, installDir)
 			versions, err := javaService.List()
@@ -146,9 +148,10 @@ func newNodeCmd() *cobra.Command {
 	}
 
 	useCmd := &cobra.Command{
-		Use:   "use [version]",
-		Short: "Use a specific version of Node.js",
-		Args:  cobra.ExactArgs(1),
+		Use:     "use [version]",
+		Short:   "Use a specific version of Node.js",
+		Aliases: []string{"set"},
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeService := node.NewService(log, installDir)
 			symlinkPath := os.Getenv("AEM_NODE_SYMLINK")
@@ -157,8 +160,9 @@ func newNodeCmd() *cobra.Command {
 	}
 
 	listCmd := &cobra.Command{
-		Use:   "list",
-		Short: "List installed NodeJS versions",
+		Use:     "list",
+		Short:   "List installed NodeJS versions",
+		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			nodeService := node.NewService(log, installDir)
 			versions, err := nodeService.List()
