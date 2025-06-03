@@ -218,3 +218,34 @@ func (s *Service) GetCurrentJDKVersion() (string, error) {
 
 	return string(data), nil
 }
+
+func (s *Service) Uninstall(majorVersion string) error {
+	s.logger.Info("Un-installing JDK version: %s", majorVersion)
+
+	// Check if the environment is being set
+	currentVersion, err := s.GetCurrentJDKVersion()
+	if err != nil {
+		return err
+	}
+
+	if currentVersion == majorVersion {
+		return errors.UninstallError(fmt.Sprintf("cannot uninstall version %s as it's the currently active version", majorVersion), nil)
+	}
+
+	// Check if already installed
+	versionPath := filepath.Join(s.installDir, "java", majorVersion)
+
+	if !s.fs.Exists(versionPath) {
+		s.logger.Info("JDK version %s not found at %s", majorVersion, versionPath)
+		return nil
+	}
+
+	// Remove version
+	s.logger.Info("Removing JDK version %s from %s", majorVersion, versionPath)
+	if err := s.fs.RemoveAll(versionPath); err != nil {
+		return fmt.Errorf("failed to remove JDK version %s: %w", majorVersion, err)
+	}
+
+	s.logger.Info("Successfully removed JDK version %s", majorVersion)
+	return nil
+}

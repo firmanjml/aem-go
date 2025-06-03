@@ -114,7 +114,23 @@ func newJavaCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Println("*  " + version)
+			fmt.Printf("*  %s", version)
+			return nil
+		},
+	}
+
+	removeCmd := &cobra.Command{
+		Use:     "remove",
+		Short:   "Remove the installed JDK version",
+		Aliases: []string{"rm"},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			javaService := java.NewService(log, installDir)
+			err := javaService.Uninstall(args[0])
+			if err != nil {
+				return err
+			}
+
 			return nil
 		},
 	}
@@ -123,6 +139,7 @@ func newJavaCmd() *cobra.Command {
 	javaCmd.AddCommand(useCmd)
 	javaCmd.AddCommand(listCmd)
 	javaCmd.AddCommand(currentCmd)
+	javaCmd.AddCommand(removeCmd)
 
 	return javaCmd
 }
@@ -191,7 +208,23 @@ func newNodeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Println("*  " + version)
+			fmt.Printf("*  %s", version)
+			return nil
+		},
+	}
+
+	removeCmd := &cobra.Command{
+		Use:     "remove",
+		Short:   "Remove the installed NodeJS version",
+		Aliases: []string{"rm"},
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			nodeService := node.NewService(log, installDir)
+			err := nodeService.Uninstall(args[0])
+			if err != nil {
+				return err
+			}
+
 			return nil
 		},
 	}
@@ -200,6 +233,7 @@ func newNodeCmd() *cobra.Command {
 	nodeCmd.AddCommand(useCmd)
 	nodeCmd.AddCommand(listCmd)
 	nodeCmd.AddCommand(currentCmd)
+	nodeCmd.AddCommand(removeCmd)
 
 	return nodeCmd
 

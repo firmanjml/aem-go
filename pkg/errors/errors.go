@@ -38,3 +38,7 @@ func NewAPIError(message string, cause error) *AEMError {
 func NewValidationError(message string) *AEMError {
 	return &AEMError{Type: "VALIDATION_ERROR", Message: message}
 }
+
+func UninstallError(message string, cause error) *AEMError {
+	return &AEMError{Type: "UNINSTALL_ERROR", Message: message, Cause: cause}
+}

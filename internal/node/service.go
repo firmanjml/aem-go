@@ -7,6 +7,7 @@ import (
 	"aem/pkg/errors"
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -282,4 +283,35 @@ func (s *Service) GetCurrentNodeVersion() (string, error) {
 	}
 
 	return string(data), nil
+}
+
+func (s *Service) Uninstall(majorVersion string) error {
+	s.logger.Info("Un-installing Node version: %s", majorVersion)
+
+	// Check if the environment is being set
+	currentVersion, err := s.GetCurrentNodeVersion()
+	if err != nil {
+		return err
+	}
+
+	if currentVersion == majorVersion {
+		return errors.UninstallError(fmt.Sprintf("cannot uninstall version %s as it's the currently active version", majorVersion), nil)
+	}
+
+	// Check if already installed
+	versionPath := filepath.Join(s.installDir, "node", majorVersion)
+
+	if !s.fs.Exists(versionPath) {
+		s.logger.Info("Node version %s not found at %s", majorVersion, versionPath)
+		return nil
+	}
+
+	// Remove version
+	s.logger.Info("Removing Node version %s from %s", majorVersion, versionPath)
+	if err := s.fs.RemoveAll(versionPath); err != nil {
+		return fmt.Errorf("failed to remove Node version %s: %w", majorVersion, err)
+	}
+
+	s.logger.Info("Successfully removed Node version %s", majorVersion)
+	return nil
 }
