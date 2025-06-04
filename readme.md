@@ -146,6 +146,8 @@ aem setup
 
 ## Configuration
 
+Enable Developer Setting to bypass UAC
+
 AEM stores configurations and installed SDKs in a user-specific directory:
 
 c:/aem/
