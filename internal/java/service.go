@@ -9,7 +9,6 @@ import (
 	"aem/pkg/logger"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -46,7 +45,7 @@ func (s *Service) Install(majorVersion string) (string, error) {
 	versionPath := filepath.Join(s.installDir, "java", "v"+majorVersion)
 	if s.fs.Exists(versionPath) {
 		s.logger.Info("JDK version %s already installed", majorVersion)
-		return "", nil
+		return "v" + majorVersion, nil
 	}
 
 	// Get platform info
@@ -93,13 +92,19 @@ func (s *Service) Use(version string, symlinkPath string) error {
 		return err
 	}
 
+	// Update version manager through filesystem
+	cleanVersion := strings.TrimPrefix(version, "v")
+	versionMgr := s.fs.GetVersionManager()
+	if err := versionMgr.SetJavaVersion(cleanVersion); err != nil {
+		s.logger.Error("Failed to update version config: %v", err)
+	}
+
 	s.logger.Info("Successfully set JDK version: %s", version)
 	return nil
 }
 
 func (s *Service) List() ([]string, error) {
 	javaPath := filepath.Join(s.installDir, "java")
-
 	if err := s.fs.EnsureDir(javaPath); err != nil {
 		return nil, err
 	}
@@ -109,20 +114,21 @@ func (s *Service) List() ([]string, error) {
 		return nil, err
 	}
 
-	jdkVersion := ""
-	data, err := os.ReadFile("java.txt")
-	if err == nil {
-		jdkVersion = strings.TrimSpace(string(data))
-	} else if !os.IsNotExist(err) {
-		return nil, err
+	// Get current version from version manager
+	versionMgr := s.fs.GetVersionManager()
+	currentVersion, err := versionMgr.GetJavaVersion()
+	if err != nil {
+		s.logger.Error("Failed to get current JDK version: %v", err)
+		currentVersion = ""
 	}
 
 	var versions []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			version := entry.Name()
+			cleanVersion := strings.TrimPrefix(version, "v")
 			prefix := "   "
-			if version == jdkVersion {
+			if cleanVersion == currentVersion || version == currentVersion {
 				prefix = "*  "
 			}
 			versions = append(versions, prefix+version)
@@ -155,13 +161,11 @@ func (s *Service) fetchPackages(javaVersion string, platform platform.Info) ([]A
 }
 
 func (s *Service) downloadAndInstall(pkg AzulPackage, finalPath string) error {
-	execPath, err := os.Executable()
+	// Get temp directory from AEM_HOME
+	tmpDir, err := s.fs.GetTempDir()
 	if err != nil {
-		return errors.NewExtractionError("failed to get executable path: %w", err)
+		return err
 	}
-
-	baseDir := filepath.Dir(execPath)
-	tmpDir := filepath.Join(baseDir, "tmp")
 
 	zipPath := filepath.Join(tmpDir, pkg.Name)
 	extractDir := filepath.Join(tmpDir, "jdk_extract")
@@ -209,21 +213,12 @@ func (s *Service) createVersionString(javaVersion []int) string {
 	for i, v := range javaVersion {
 		parts[i] = strconv.Itoa(v)
 	}
-	return strings.Join(parts, ".")
+	return "v" + strings.Join(parts, ".")
 }
 
 func (s *Service) GetCurrentJDKVersion() (string, error) {
-	s.logger.Debug("Fetching JDK current environment versions")
-
-	data, err := os.ReadFile("java.txt")
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "no current version", nil
-		}
-		return "", errors.NewFileSystemError("failed to read JDK setting", err)
-	}
-
-	return string(data), nil
+	versionMgr := s.fs.GetVersionManager()
+	return versionMgr.GetJavaVersion()
 }
 
 func (s *Service) Uninstall(majorVersion string) error {
@@ -235,22 +230,34 @@ func (s *Service) Uninstall(majorVersion string) error {
 		return err
 	}
 
-	if currentVersion == majorVersion {
+	if currentVersion == majorVersion || currentVersion == "v"+majorVersion {
 		return errors.UninstallError(fmt.Sprintf("cannot uninstall version %s as it's the currently active version", majorVersion), nil)
 	}
 
 	// Check if already installed
 	versionPath := filepath.Join(s.installDir, "java", majorVersion)
-
 	if !s.fs.Exists(versionPath) {
-		s.logger.Info("JDK version %s not found at %s", majorVersion, versionPath)
-		return nil
+		vVersionPath := filepath.Join(s.installDir, "java", "v"+majorVersion)
+		if s.fs.Exists(vVersionPath) {
+			versionPath = vVersionPath
+		} else {
+			s.logger.Info("JDK version %s not found", majorVersion)
+			return nil
+		}
 	}
 
 	// Remove version
 	s.logger.Info("Removing JDK version %s from %s", majorVersion, versionPath)
 	if err := s.fs.RemoveAll(versionPath); err != nil {
 		return fmt.Errorf("failed to remove JDK version %s: %w", majorVersion, err)
+	}
+
+	// Clear from version manager if it was the current version
+	if currentVersion == majorVersion || currentVersion == "v"+majorVersion {
+		versionMgr := s.fs.GetVersionManager()
+		if err := versionMgr.ClearJavaVersion(); err != nil {
+			s.logger.Error("Failed to clear version from config: %v", err)
+		}
 	}
 
 	s.logger.Info("Successfully removed JDK version %s", majorVersion)

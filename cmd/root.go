@@ -5,25 +5,27 @@ import (
 	"aem/internal/java"
 	"aem/internal/node"
 	"aem/internal/setup"
+	"aem/pkg/filesystem"
 	"aem/pkg/logger"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 
 	"github.com/spf13/cobra"
 )
 
 var (
-	debug      bool
-	log        *logger.Logger
-	installDir = filepath.Join(os.Getenv("AEM_HOME"), "sys_installed")
+	debug bool
+	log   *logger.Logger
+	fs    *filesystem.FileSystem
 )
 
 var rootCmd = &cobra.Command{
 	Use: "aem",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		log = logger.New(debug)
+		fs = filesystem.New(log)
+
 		if debug {
 			log.Debug("AEM verbose mode enabled")
 			log.Debug("Operating System: %s", runtime.GOOS)
@@ -67,6 +69,10 @@ func newJavaCmd() *cobra.Command {
 		Short: "Install a specific major version of JDK",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			javaService := java.NewService(log, installDir)
 			_, err := javaService.Install(args[0])
 			return err
@@ -79,6 +85,10 @@ func newJavaCmd() *cobra.Command {
 		Aliases: []string{"set"},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			javaService := java.NewService(log, installDir)
 			symlinkPath := os.Getenv("AEM_JAVA_SYMLINK")
 			return javaService.Use(args[0], symlinkPath)
@@ -90,6 +100,10 @@ func newJavaCmd() *cobra.Command {
 		Short:   "List installed JDK versions",
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			javaService := java.NewService(log, installDir)
 			versions, err := javaService.List()
 			if err != nil {
@@ -112,6 +126,10 @@ func newJavaCmd() *cobra.Command {
 		Use:   "current",
 		Short: "List the current JDK versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			javaService := java.NewService(log, installDir)
 			version, err := javaService.GetCurrentJDKVersion()
 			if err != nil {
@@ -128,6 +146,10 @@ func newJavaCmd() *cobra.Command {
 		Aliases: []string{"rm"},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			javaService := java.NewService(log, installDir)
 			err := javaService.Uninstall(args[0])
 			if err != nil {
@@ -162,6 +184,10 @@ func newNodeCmd() *cobra.Command {
 		Short: "Install a specific major version of Node.js",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			nodeService := node.NewService(log, installDir)
 			_, err := nodeService.Install(args[0])
 			return err
@@ -174,6 +200,10 @@ func newNodeCmd() *cobra.Command {
 		Aliases: []string{"set"},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			nodeService := node.NewService(log, installDir)
 			symlinkPath := os.Getenv("AEM_NODE_SYMLINK")
 			return nodeService.Use(args[0], symlinkPath)
@@ -185,6 +215,10 @@ func newNodeCmd() *cobra.Command {
 		Short:   "List installed NodeJS versions",
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			nodeService := node.NewService(log, installDir)
 			versions, err := nodeService.List()
 			if err != nil {
@@ -207,6 +241,10 @@ func newNodeCmd() *cobra.Command {
 		Use:   "current",
 		Short: "List the current NodeJS versions",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			nodeService := node.NewService(log, installDir)
 			version, err := nodeService.GetCurrentNodeVersion()
 			if err != nil {
@@ -223,6 +261,10 @@ func newNodeCmd() *cobra.Command {
 		Aliases: []string{"rm"},
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			nodeService := node.NewService(log, installDir)
 			err := nodeService.Uninstall(args[0])
 			if err != nil {
@@ -244,14 +286,23 @@ func newNodeCmd() *cobra.Command {
 }
 
 func newSetupCmd() *cobra.Command {
+
 	setupCmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Setup development environment from aem.json",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, dirErr := getInstallDir()
+			if dirErr != nil {
+				return dirErr
+			}
 			setupService := setup.NewService(log, installDir)
 			return setupService.Setup()
 		},
 	}
 
 	return setupCmd
+}
+
+func getInstallDir() (string, error) {
+	return fs.GetInstallDir()
 }

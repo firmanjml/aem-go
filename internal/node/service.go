@@ -8,7 +8,6 @@ import (
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -69,7 +68,7 @@ func (s *Service) Install(majorVersion string) (string, error) {
 	versionPath := filepath.Join(s.installDir, "node", latest)
 	if s.fs.Exists(versionPath) {
 		s.logger.Info("Node.js version %s already installed", latest)
-		return "", nil
+		return strings.TrimPrefix(latest, "v"), nil
 	}
 
 	// Download and install
@@ -89,9 +88,17 @@ func (s *Service) Install(majorVersion string) (string, error) {
 func (s *Service) Use(version string, symlinkPath string) error {
 	s.logger.Info("Setting Node.js version: %s", version)
 
+	// Handle both with and without 'v' prefix
 	versionPath := filepath.Join(s.installDir, "node", version)
 	if !s.fs.Exists(versionPath) {
-		return errors.NewValidationError("Node.js version not installed: " + version)
+		// Try with 'v' prefix
+		vVersionPath := filepath.Join(s.installDir, "node", "v"+version)
+		if s.fs.Exists(vVersionPath) {
+			versionPath = vVersionPath
+			version = "v" + version
+		} else {
+			return errors.NewValidationError("Node.js version not installed: " + version)
+		}
 	}
 
 	if symlinkPath == "" {
@@ -102,13 +109,19 @@ func (s *Service) Use(version string, symlinkPath string) error {
 		return err
 	}
 
+	// Update version manager through filesystem
+	cleanVersion := strings.TrimPrefix(version, "v")
+	versionMgr := s.fs.GetVersionManager()
+	if err := versionMgr.SetNodeVersion(cleanVersion); err != nil {
+		s.logger.Error("Failed to update version config: %v", err)
+	}
+
 	s.logger.Info("Successfully set Node.js version: %s", version)
 	return nil
 }
 
 func (s *Service) List() ([]string, error) {
 	nodePath := filepath.Join(s.installDir, "node")
-
 	if err := s.fs.EnsureDir(nodePath); err != nil {
 		return nil, err
 	}
@@ -118,20 +131,21 @@ func (s *Service) List() ([]string, error) {
 		return nil, err
 	}
 
-	nodeVersion := ""
-	data, err := os.ReadFile("node.txt")
-	if err == nil {
-		nodeVersion = strings.TrimSpace(string(data))
-	} else if !os.IsNotExist(err) {
-		return nil, err
+	// Get current version from version manager
+	versionMgr := s.fs.GetVersionManager()
+	currentVersion, err := versionMgr.GetNodeVersion()
+	if err != nil {
+		s.logger.Error("Failed to get current Node.js version: %v", err)
+		currentVersion = ""
 	}
 
 	var versions []string
 	for _, entry := range entries {
 		if entry.IsDir() {
 			version := entry.Name()
+			cleanVersion := strings.TrimPrefix(version, "v")
 			prefix := "   "
-			if version == nodeVersion {
+			if cleanVersion == currentVersion || version == currentVersion {
 				prefix = "*  "
 			}
 			versions = append(versions, prefix+version)
@@ -227,18 +241,16 @@ func (s *Service) getDownloadURL(version string) (string, error) {
 }
 
 func (s *Service) downloadAndInstall(url, version string) error {
-	execPath, err := os.Executable()
+	// Get temp directory from AEM_HOME
+	tmpDir, err := s.fs.GetTempDir()
 	if err != nil {
-		return errors.NewExtractionError("failed to get executable path: %w", err)
+		return err
 	}
-
-	baseDir := filepath.Dir(execPath)
-	tmpDir := filepath.Join(baseDir, "tmp")
 
 	fileName := filepath.Base(url)
 	zipPath := filepath.Join(tmpDir, fileName)
 	extractDir := filepath.Join(tmpDir, "node_extract")
-	finalPath := filepath.Join(s.installDir, "node", version)
+	finalPath := filepath.Join(s.installDir, "node", "v"+version)
 
 	// Ensure cleanup
 	defer func() {
@@ -279,17 +291,8 @@ func (s *Service) downloadAndInstall(url, version string) error {
 }
 
 func (s *Service) GetCurrentNodeVersion() (string, error) {
-	s.logger.Debug("Fetching Node.js current environment versions")
-
-	data, err := os.ReadFile("node.txt")
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "no current version", nil
-		}
-		return "", errors.NewFileSystemError("failed to read node setting", err)
-	}
-
-	return string(data), nil
+	versionMgr := s.fs.GetVersionManager()
+	return versionMgr.GetNodeVersion()
 }
 
 func (s *Service) Uninstall(majorVersion string) error {
@@ -301,22 +304,34 @@ func (s *Service) Uninstall(majorVersion string) error {
 		return err
 	}
 
-	if currentVersion == majorVersion {
+	if currentVersion == majorVersion || currentVersion == "v"+majorVersion {
 		return errors.UninstallError(fmt.Sprintf("cannot uninstall version %s as it's the currently active version", majorVersion), nil)
 	}
 
-	// Check if already installed
+	// Try both with and without 'v' prefix
 	versionPath := filepath.Join(s.installDir, "node", majorVersion)
-
 	if !s.fs.Exists(versionPath) {
-		s.logger.Info("Node version %s not found at %s", majorVersion, versionPath)
-		return nil
+		vVersionPath := filepath.Join(s.installDir, "node", "v"+majorVersion)
+		if s.fs.Exists(vVersionPath) {
+			versionPath = vVersionPath
+		} else {
+			s.logger.Info("Node version %s not found", majorVersion)
+			return nil
+		}
 	}
 
 	// Remove version
 	s.logger.Info("Removing Node version %s from %s", majorVersion, versionPath)
 	if err := s.fs.RemoveAll(versionPath); err != nil {
 		return fmt.Errorf("failed to remove Node version %s: %w", majorVersion, err)
+	}
+
+	// Clear from version manager if it was the current version
+	if currentVersion == majorVersion || currentVersion == "v"+majorVersion {
+		versionMgr := s.fs.GetVersionManager()
+		if err := versionMgr.ClearNodeVersion(); err != nil {
+			s.logger.Error("Failed to clear version from config: %v", err)
+		}
 	}
 
 	s.logger.Info("Successfully removed Node version %s", majorVersion)
