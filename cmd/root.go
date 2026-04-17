@@ -2,14 +2,23 @@ package cmd
 
 import (
 	"aem/assets"
-	"aem/extensions/java"
-	"aem/extensions/node"
+	javaext "aem/extensions/java"
+	nodeext "aem/extensions/node"
+	javasvc "aem/internal/java"
+	nodesvc "aem/internal/node"
+	"aem/internal/setup"
 	"aem/internal/manager"
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
+	"aem/pkg/process"
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
 	"runtime"
+	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -80,25 +89,274 @@ var listCmd = &cobra.Command{
 	},
 }
 
+var installCmd = &cobra.Command{
+	Use:   "install [module] [version]",
+	Short: "Install a Java or Node version",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		module := args[0]
+		version := args[1]
+
+		installDir, err := fs.GetInstallDir()
+		if err != nil {
+			return err
+		}
+
+		switch module {
+		case "node":
+			service := nodesvc.NewService(log, installDir)
+			installedVersion, err := service.Install(version)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Installed node %s\n", installedVersion)
+			return nil
+		case "java":
+			service := javasvc.NewService(log, installDir)
+			installedVersion, err := service.Install(version)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Installed java %s\n", strings.TrimPrefix(installedVersion, "v"))
+			return nil
+		default:
+			return fmt.Errorf("%s module does not exist", module)
+		}
+	},
+}
+
+var useCmd = &cobra.Command{
+	Use:     "use [module] [version]",
+	Aliases: []string{"set"},
+	Short:   "Switch the active Java or Node version",
+	Args:    cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		module := args[0]
+		version := args[1]
+
+		installDir, err := fs.GetInstallDir()
+		if err != nil {
+			return err
+		}
+
+		switch module {
+		case "node":
+			service := nodesvc.NewService(log, installDir)
+			symlinkPath, err := resolveRuntimeSymlinkPath("AEM_NODE_SYMLINK", "node")
+			if err != nil {
+				return err
+			}
+			if err := service.Use(version, symlinkPath); err != nil {
+				return err
+			}
+			fmt.Printf("Using node %s\n", version)
+			return nil
+		case "java":
+			service := javasvc.NewService(log, installDir)
+			symlinkPath, err := resolveRuntimeSymlinkPath("AEM_JAVA_SYMLINK", "java")
+			if err != nil {
+				return err
+			}
+			if err := service.Use(normalizeJavaVersion(version), symlinkPath); err != nil {
+				return err
+			}
+			fmt.Printf("Using java %s\n", strings.TrimPrefix(version, "v"))
+			return nil
+		default:
+			return fmt.Errorf("%s module does not exist", module)
+		}
+	},
+}
+
+var currentCmd = &cobra.Command{
+	Use:   "current",
+	Short: "Show the current active runtimes",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		st, err := fs.GetState()
+		if err != nil {
+			return err
+		}
+
+		nodeVersion, err := st.CurrentNodeVersion()
+		if err != nil {
+			return err
+		}
+
+		javaVersion, err := st.CurrentJavaVersion()
+		if err != nil {
+			return err
+		}
+
+		androidPath, err := st.CurrentAndroidPath()
+		if err != nil {
+			return err
+		}
+
+		printCurrent("node", nodeVersion)
+		printCurrent("java", javaVersion)
+		if androidPath == "" {
+			fmt.Println("android: none")
+		} else {
+			fmt.Printf("android: %s\n", androidPath)
+		}
+
+		return nil
+	},
+}
+
+var doctorCmd = &cobra.Command{
+	Use:   "doctor",
+	Short: "Show local AEM state and health checks",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		aemHome, err := fs.GetAEMHome()
+		if err != nil {
+			return err
+		}
+		installDir, err := fs.GetInstallDir()
+		if err != nil {
+			return err
+		}
+		currentRoot, err := fs.GetCurrentRoot()
+		if err != nil {
+			return err
+		}
+		st, err := fs.GetState()
+		if err != nil {
+			return err
+		}
+
+		nodeVersion, err := st.CurrentNodeVersion()
+		if err != nil {
+			return err
+		}
+		javaVersion, err := st.CurrentJavaVersion()
+		if err != nil {
+			return err
+		}
+		androidPath, err := st.CurrentAndroidPath()
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("AEM home: %s\n", aemHome)
+		fmt.Printf("Install dir: %s\n", installDir)
+		fmt.Printf("Current links: %s\n", currentRoot)
+		fmt.Printf("Node installed: %d\n", countInstalledDirs(filepath.Join(installDir, "node")))
+		fmt.Printf("Java installed: %d\n", countInstalledDirs(filepath.Join(installDir, "java")))
+		printDoctorRuntime("node", nodeVersion, filepath.Join(currentRoot, "node"))
+		printDoctorRuntime("java", javaVersion, filepath.Join(currentRoot, "java"))
+		if androidPath == "" {
+			fmt.Printf("android current: missing (%s)\n", filepath.Join(currentRoot, "android"))
+		} else {
+			fmt.Printf("android current: %s\n", androidPath)
+		}
+		if legacyVersionsExists(aemHome) {
+			fmt.Printf("versions.json: present (%s)\n", filepath.Join(aemHome, "versions.json"))
+		} else {
+			fmt.Println("versions.json: absent")
+		}
+
+		return nil
+	},
+}
+
 func Execute() {
-	nodeExtension := node.NewNodeExtension()
-	javaExtension := java.NewJavaExtension()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	process.SetContext(ctx)
+
+	nodeExtension := nodeext.NewNodeExtension()
+	javaExtension := javaext.NewJavaExtension()
 	extensionMgr.RegisterExtension("node", nodeExtension)
 	extensionMgr.RegisterExtension("java", javaExtension)
 
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "enable verbose mode")
 
-	// rootCmd.AddCommand(newSetupCmd())
-	// rootCmd.AddCommand(newNodeCmd())
+	rootCmd.AddCommand(newSetupCmd())
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(installCmd)
+	rootCmd.AddCommand(useCmd)
+	rootCmd.AddCommand(currentCmd)
+	rootCmd.AddCommand(doctorCmd)
 
-	if err := rootCmd.Execute(); err != nil {
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if log != nil {
 			log.Fatal("Command execution failed: %v", err)
 		} else {
 			fmt.Printf("Error: %v\n", err)
 			os.Exit(1)
 		}
+	}
+}
+
+func printCurrent(name, version string) {
+	if version == "" {
+		fmt.Printf("%s: none\n", name)
+		return
+	}
+	fmt.Printf("%s: %s\n", name, version)
+}
+
+func printDoctorRuntime(name, version, linkPath string) {
+	if version == "" {
+		fmt.Printf("%s current: missing (%s)\n", name, linkPath)
+		return
+	}
+	fmt.Printf("%s current: %s\n", name, version)
+}
+
+func countInstalledDirs(path string) int {
+	entries, err := fs.ListDir(path)
+	if err != nil {
+		return 0
+	}
+
+	total := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			total++
+		}
+	}
+	return total
+}
+
+func legacyVersionsExists(aemHome string) bool {
+	return fs.Exists(filepath.Join(aemHome, "versions.json"))
+}
+
+func resolveRuntimeSymlinkPath(envName, module string) (string, error) {
+	if value := os.Getenv(envName); value != "" {
+		return value, nil
+	}
+
+	currentRoot, err := fs.GetCurrentRoot()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(currentRoot, module), nil
+}
+
+func normalizeJavaVersion(version string) string {
+	if strings.HasPrefix(version, "v") {
+		return version
+	}
+	return "v" + version
+}
+
+func newSetupCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "setup",
+		Short: "Setup development environment from the nearest aem.json",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			installDir, err := fs.GetInstallDir()
+			if err != nil {
+				return err
+			}
+
+			setupService := setup.NewService(log, installDir)
+			return setupService.Setup()
+		},
 	}
 }
 

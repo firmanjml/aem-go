@@ -112,31 +112,25 @@ Run `aem` with commands to manage your environment:
 # Show help and available commands
 aem --help
 
-# Install a specific Node.js version
-aem node install 16.14.0
+# List available remote versions for a module
+aem list node
+aem list java 17
 
-# List installed Node.js versions
-aem node list
+# Install a runtime version
+aem install node 20
+aem install java 17
 
-# Use a specific Node.js version for your project
-aem node use 16.14.0
+# Switch the active runtime version
+aem use node 20.11.1
+aem use java 17.0.15
 
-# Remove installed Node.js versions
-aem node remove 16.14.0
+# Show the currently active runtimes
+aem current
 
-# Install a Java JDK version via Azul Zulu API
-aem java install 11.0.15
+# Inspect local state and health
+aem doctor
 
-# List installed Java versions
-aem java list
-
-# Remove installed Java versions
-aem java remove 11.0.15
-
-# Install Android SDK components
-aem android install
-
-# Setup environment by retrieving configuration from aem.json
+# Setup the current project from the nearest aem.json
 aem setup
 ```
 
@@ -146,37 +140,57 @@ aem setup
 
 ## Configuration
 
-Enable Developer Setting to bypass UAC
+`aem setup` now behaves like a project-aware switcher:
 
-AEM stores configurations and installed SDKs in a user-specific directory:
+- It searches for the nearest `aem.json` in the current directory or any parent directory.
+- It uses cached installs from `AEM_HOME` when available.
+- If a requested runtime is missing, it downloads and installs it automatically.
+- It switches the active toolchain by updating stable symlinks, so your shell only needs to be configured once.
+- The active version is resolved from those symlinks, not from parsing `versions.json`.
 
-c:/aem/
+If `AEM_HOME` is not set, AEM defaults to:
 
-Create an environmental variables:
-- AEM_HOME -> C:\Users\haru1\OneDrive\Desktop\Projects\aem-go
-- AEM_JAVA_SYMLINK -> C:\aem\jdk
-- AEM_NODE_SYMLINK -> C:\aem\nodejs
+- macOS/Linux: `~/.aem`
+- Windows: `%USERPROFILE%\.aem`
 
-Add these ENV into PATH
-- %AEM_HOME%
-- %AEM_NODE_SYMLINK%
-- %AEM_JAVA_SYMLINK%
-- %AEM_JAVA_SYMLINK%\bin
+Default active symlinks are created under:
 
-![Editing Env Path](https://github.com/user-attachments/assets/2305fe63-b2c3-42d2-82d3-9f6d8ad9969f)
+- `~/.aem/current/node`
+- `~/.aem/current/java`
+- `~/.aem/current/android`
 
-Example of aem.json
+You can override them with:
+
+- `AEM_HOME`
+- `AEM_NODE_SYMLINK`
+- `AEM_JAVA_SYMLINK`
+- `AEM_ANDROID_SYMLINK`
+
+Recommended shell setup:
+
+- Add your `aem` binary to `PATH`
+- Add `~/.aem/current/node/bin` to `PATH`
+- Add `~/.aem/current/java/bin` to `PATH`
+- Add `~/.aem/current/android/platform-tools` to `PATH`
+- Add `~/.aem/current/android/cmdline-tools/latest/bin` to `PATH`
+- Set `JAVA_HOME=~/.aem/current/java`
+- Set `ANDROID_HOME=~/.aem/current/android`
+- Set `ANDROID_SDK_ROOT=~/.aem/current/android`
+
+Example `aem.json`
 ```
 {
   "node": "16.20.2",
   "jdk": "17.0.15",
   "android": {
-    "sdk": "",
-    "ndk": "",
-    "build-tool": ""
+    "sdk": ["34"],
+    "ndk": ["25.1.8937393"],
+    "build-tool": ["34.0.0"]
   }
 }
 ```
+
+Android values can be either arrays or single strings. During `aem setup`, AEM ensures Android command-line tools are installed, accepts SDK licenses, and installs the requested packages through `sdkmanager`.
 
 ---
 
@@ -222,4 +236,3 @@ Feel free to reach out or create issues for any bugs, suggestions, or questions.
 ---
 
 Thank you for using Adaptive Environment Manager! 🚀
-

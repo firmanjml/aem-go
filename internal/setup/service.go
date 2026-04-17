@@ -1,89 +1,120 @@
 package setup
 
 import (
+	"aem/internal/android"
+	"aem/internal/config"
 	"aem/internal/java"
 	"aem/internal/node"
 	"aem/pkg/logger"
-	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 )
 
 type Service struct {
 	logger *logger.Logger
 	node   *node.Service
 	java   *java.Service
-}
-
-type AEMConfig struct {
-	Node    string        `json:"node"`
-	JDK     string        `json:"jdk"`
-	Android AndroidConfig `json:"android"`
-}
-
-type AndroidConfig struct {
-	SDK       []string `json:"sdk"`
-	NDK       []string `json:"ndk"`
-	BuildTool []string `json:"build-tool"`
+	android *android.Service
 }
 
 func NewService(logger *logger.Logger, installDir string) *Service {
 	return &Service{
-		logger: logger,
-		node:   node.NewService(logger, installDir),
-		java:   java.NewService(logger, installDir),
+		logger:  logger,
+		node:    node.NewService(logger, installDir),
+		java:    java.NewService(logger, installDir),
+		android: android.NewService(logger, installDir),
 	}
 }
 
 func (s *Service) Setup() error {
 	s.logger.Info("Starting environment setup")
 
-	// Read aem.json file
-	config, err := s.readConfig()
+	configPath, err := config.FindProjectConfig("")
+	if err != nil {
+		return err
+	}
+	s.logger.Debug("Using project config: %s", configPath)
+
+	projectConfig, err := config.LoadProjectConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	// Process Node.js installation if specified
-	if config.Node != "" {
-		if err := s.setupNode(config.Node); err != nil {
-			return err
-		}
-	} else {
-		s.logger.Info("No Node.js version specified in config")
+	javaHome, err := s.setupCoreRuntimes(projectConfig)
+	if err != nil {
+		return err
 	}
 
-	// Process JDK installation if specified
-	if config.JDK != "" {
-		if err := s.setupJava(config.JDK); err != nil {
-			return err
-		}
-	} else {
-		s.logger.Info("No JDK version specified in config")
+	if err := s.setupAndroid(projectConfig.Android, javaHome); err != nil {
+		return err
 	}
 
 	s.logger.Info("Environment setup completed successfully")
 	return nil
 }
 
-func (s *Service) readConfig() (*AEMConfig, error) {
-	s.logger.Debug("Reading aem.json configuration file")
-	data, err := os.ReadFile("aem.json")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read aem.json: %w", err)
+func (s *Service) setupCoreRuntimes(projectConfig *config.ProjectConfig) (string, error) {
+	var wg sync.WaitGroup
+
+	nodeErrCh := make(chan error, 1)
+	javaErrCh := make(chan error, 1)
+	javaHomeCh := make(chan string, 1)
+
+	if projectConfig.Node != "" {
+		wg.Add(1)
+		go func(version string) {
+			defer wg.Done()
+			nodeErrCh <- s.setupNode(version)
+		}(projectConfig.Node)
+	} else {
+		s.logger.Debug("No Node.js version specified in config")
 	}
 
-	var config AEMConfig
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("failed to parse aem.json: %w", err)
+	if projectConfig.JDK != "" {
+		wg.Add(1)
+		go func(version string) {
+			defer wg.Done()
+			javaHome, err := s.setupJava(version)
+			if err != nil {
+				javaErrCh <- err
+				return
+			}
+			javaHomeCh <- javaHome
+			javaErrCh <- nil
+		}(projectConfig.JDK)
+	} else {
+		s.logger.Debug("No JDK version specified in config")
 	}
 
-	return &config, nil
+	wg.Wait()
+	close(nodeErrCh)
+	close(javaErrCh)
+	close(javaHomeCh)
+
+	for err := range nodeErrCh {
+		if err != nil {
+			return "", err
+		}
+	}
+
+	for err := range javaErrCh {
+		if err != nil {
+			return "", err
+		}
+	}
+
+	for javaHome := range javaHomeCh {
+		return javaHome, nil
+	}
+
+	return "", nil
 }
 
 func (s *Service) setupNode(version string) error {
-	s.logger.Info("Setting up Node.js version: %s", version)
+	s.logger.Debug("Setting up Node.js version: %s", version)
 
 	// Normalize version format
 	if !strings.HasPrefix(version, "v") {
@@ -100,8 +131,11 @@ func (s *Service) setupNode(version string) error {
 		return fmt.Errorf("failed to find installed version for %s", version)
 	}
 
-	// Set Node.js version
-	symlinkPath := os.Getenv("AEM_NODE_SYMLINK")
+	symlinkPath, err := resolveSymlinkPath("AEM_NODE_SYMLINK", "current", "node")
+	if err != nil {
+		return err
+	}
+
 	if err := s.node.Use(lastestNodeVersion, symlinkPath); err != nil {
 		return fmt.Errorf("failed to set Node.js version: %w", err)
 	}
@@ -109,24 +143,70 @@ func (s *Service) setupNode(version string) error {
 	return nil
 }
 
-func (s *Service) setupJava(version string) error {
-	s.logger.Info("Setting up JDK version: %s", version)
+func (s *Service) setupJava(version string) (string, error) {
+	s.logger.Debug("Setting up JDK version: %s", version)
 
-	// Install JDK
 	lastestJdkVersion, err := s.java.Install(version)
 	if err != nil {
-		return fmt.Errorf("failed to install JDK: %w", err)
+		return "", fmt.Errorf("failed to install JDK: %w", err)
 	}
 
 	if lastestJdkVersion == "" {
-		return fmt.Errorf("failed to find installed version for %s", version)
+		return "", fmt.Errorf("failed to find installed version for %s", version)
 	}
 
-	// Set JDK version
-	symlinkPath := os.Getenv("AEM_JAVA_SYMLINK")
+	symlinkPath, err := resolveSymlinkPath("AEM_JAVA_SYMLINK", "current", "java")
+	if err != nil {
+		return "", err
+	}
+
 	if err := s.java.Use(lastestJdkVersion, symlinkPath); err != nil {
-		return fmt.Errorf("failed to set JDK version: %w", err)
+		return "", fmt.Errorf("failed to set JDK version: %w", err)
+	}
+
+	return filepath.Clean(symlinkPath), nil
+}
+
+func (s *Service) setupAndroid(cfg config.AndroidConfig, javaHome string) error {
+	if len(cfg.SDK) == 0 && len(cfg.NDK) == 0 && len(cfg.BuildTool) == 0 {
+		s.logger.Debug("No Android SDK configuration specified in config")
+		return nil
+	}
+
+	s.logger.Debug("Setting up Android SDK packages")
+	if err := s.android.Setup(cfg, javaHome); err != nil {
+		return err
+	}
+
+	symlinkPath, err := resolveSymlinkPath("AEM_ANDROID_SYMLINK", "current", "android")
+	if err != nil {
+		return err
+	}
+
+	if err := s.android.Use(symlinkPath); err != nil {
+		return fmt.Errorf("failed to set Android SDK path: %w", err)
 	}
 
 	return nil
+}
+
+func resolveSymlinkPath(envName string, defaults ...string) (string, error) {
+	if value := strings.TrimSpace(getEnv(envName)); value != "" {
+		return value, nil
+	}
+
+	aemHome := strings.TrimSpace(getEnv("AEM_HOME"))
+	if aemHome == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("%s and AEM_HOME are not configured", envName)
+		}
+		aemHome = filepath.Join(homeDir, ".aem")
+	}
+
+	return filepath.Join(append([]string{aemHome}, defaults...)...), nil
+}
+
+var getEnv = func(key string) string {
+	return os.Getenv(key)
 }

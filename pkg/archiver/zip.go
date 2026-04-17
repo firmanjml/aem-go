@@ -3,6 +3,8 @@ package archiver
 import (
 	"aem/pkg/errors"
 	"aem/pkg/logger"
+	"aem/pkg/process"
+	"aem/pkg/progress"
 	"archive/zip"
 	"fmt"
 	"io"
@@ -32,10 +34,17 @@ func (ze *ZipExtractor) Extract(src, dest string) error {
 		return errors.NewExtractionError("failed to create destination directory", err)
 	}
 
+	tracker := progress.New("Extracting "+filepath.Base(src), int64(len(r.File)))
+	defer tracker.Finish()
+
 	for _, f := range r.File {
+		if err := process.Context().Err(); err != nil {
+			return errors.NewExtractionError("zip extraction canceled", err)
+		}
 		if err := ze.extractFile(f, dest); err != nil {
 			return err
 		}
+		tracker.Add(1)
 	}
 
 	ze.logger.Debug("Successfully extracted zip file")
@@ -54,11 +63,19 @@ func (ze *ZipExtractor) extractFile(f *zip.File, destBase string) error {
 		return os.MkdirAll(fpath, f.Mode())
 	}
 
+	if f.Mode()&os.ModeSymlink != 0 {
+		return ze.extractSymlink(f, fpath)
+	}
+
 	if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
 		return errors.NewExtractionError("failed to create file directory", err)
 	}
 
-	outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+	if err := os.RemoveAll(fpath); err != nil {
+		return errors.NewExtractionError("failed to remove existing extracted file", err)
+	}
+
+	outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return errors.NewExtractionError("failed to create extracted file", err)
 	}
@@ -73,6 +90,42 @@ func (ze *ZipExtractor) extractFile(f *zip.File, destBase string) error {
 	_, err = io.Copy(outFile, rc)
 	if err != nil {
 		return errors.NewExtractionError("failed to write extracted file", err)
+	}
+
+	if err := os.Chmod(fpath, f.Mode()); err != nil {
+		return errors.NewExtractionError("failed to apply extracted file permissions", err)
+	}
+
+	return nil
+}
+
+func (ze *ZipExtractor) extractSymlink(f *zip.File, linkPath string) error {
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0755); err != nil {
+		return errors.NewExtractionError("failed to create symlink directory", err)
+	}
+
+	rc, err := f.Open()
+	if err != nil {
+		return errors.NewExtractionError("failed to open symlink in zip", err)
+	}
+	defer rc.Close()
+
+	targetBytes, err := io.ReadAll(rc)
+	if err != nil {
+		return errors.NewExtractionError("failed to read symlink target from zip", err)
+	}
+
+	target := strings.TrimSpace(string(targetBytes))
+	if target == "" {
+		return errors.NewExtractionError("empty symlink target in zip", nil)
+	}
+
+	if err := os.RemoveAll(linkPath); err != nil {
+		return errors.NewExtractionError("failed to remove existing symlink target path", err)
+	}
+
+	if err := os.Symlink(target, linkPath); err != nil {
+		return errors.NewExtractionError("failed to create symlink from zip", err)
 	}
 
 	return nil

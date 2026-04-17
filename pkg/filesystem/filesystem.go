@@ -3,6 +3,7 @@ package filesystem
 import (
 	"aem/pkg/errors"
 	"aem/pkg/logger"
+	"aem/pkg/state"
 	"aem/pkg/version"
 	"os"
 	"path/filepath"
@@ -16,8 +17,7 @@ type FileSystem struct {
 }
 
 func New(logger *logger.Logger) *FileSystem {
-	// Initialize version manager with default path in AEM_HOME
-	aemHome := os.Getenv("AEM_HOME")
+	aemHome := resolveAEMHome()
 	var configPath string
 	if aemHome != "" {
 		configPath = filepath.Join(aemHome, "versions.json")
@@ -61,6 +61,10 @@ func (fs *FileSystem) Move(src, dst string) error {
 func (fs *FileSystem) CreateSymlink(link, target string) error {
 	fs.logger.Debug("Creating symlink: %s -> %s", link, target)
 
+	if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+		return errors.NewFileSystemError("failed to create symlink parent directory", err)
+	}
+
 	// Remove existing symlink if it exists
 	if _, err := os.Lstat(link); err == nil {
 		if err := os.Remove(link); err != nil {
@@ -80,15 +84,6 @@ func (fs *FileSystem) CreateSymlink(link, target string) error {
 			return errors.NewFileSystemError("failed to create symlink (may need administrator privileges on Windows)", err)
 		}
 		return errors.NewFileSystemError("failed to create symlink", err)
-	}
-
-	// Extract module and version from target path for version tracking
-	module, version := fs.extractModuleVersion(target)
-	if module != "" && version != "" {
-		if err := fs.updateVersionManager(module, version); err != nil {
-			fs.logger.Error("Failed to update version manager: %v", err)
-			// Don't return error here as symlink was successful
-		}
 	}
 
 	return nil
@@ -137,9 +132,9 @@ func (fs *FileSystem) ListDir(path string) ([]os.DirEntry, error) {
 
 // GetAEMHome returns the AEM_HOME directory, creating it if necessary
 func (fs *FileSystem) GetAEMHome() (string, error) {
-	aemHome := os.Getenv("AEM_HOME")
+	aemHome := resolveAEMHome()
 	if aemHome == "" {
-		return "", errors.NewValidationError("AEM_HOME environment variable not set")
+		return "", errors.NewValidationError("unable to determine AEM home directory")
 	}
 
 	if err := fs.EnsureDir(aemHome); err != nil {
@@ -179,7 +174,43 @@ func (fs *FileSystem) GetInstallDir() (string, error) {
 	return installDir, nil
 }
 
+func (fs *FileSystem) GetCurrentRoot() (string, error) {
+	aemHome, err := fs.GetAEMHome()
+	if err != nil {
+		return "", err
+	}
+
+	currentRoot := filepath.Join(aemHome, "current")
+	if err := fs.EnsureDir(currentRoot); err != nil {
+		return "", err
+	}
+
+	return currentRoot, nil
+}
+
+func (fs *FileSystem) GetState() (*state.State, error) {
+	currentRoot, err := fs.GetCurrentRoot()
+	if err != nil {
+		return nil, err
+	}
+
+	return state.New(state.NewOSReader(), currentRoot), nil
+}
+
 // GetVersionManager returns the version manager instance
 func (fs *FileSystem) GetVersionManager() *version.Manager {
 	return fs.versionMgr
+}
+
+func resolveAEMHome() string {
+	if value := strings.TrimSpace(os.Getenv("AEM_HOME")); value != "" {
+		return value
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	return filepath.Join(homeDir, ".aem")
 }

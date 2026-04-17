@@ -10,8 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 type Service struct {
@@ -39,12 +42,12 @@ func NewService(logger *logger.Logger, installDir string) *Service {
 }
 
 func (s *Service) Install(majorVersion string) (string, error) {
-	s.logger.Info("Installing JDK version: %s", majorVersion)
+	s.logger.Debug("Installing JDK version: %s", majorVersion)
 
 	// Check if already installed
 	versionPath := filepath.Join(s.installDir, "java", "v"+majorVersion)
 	if s.fs.Exists(versionPath) {
-		s.logger.Info("JDK version %s already installed", majorVersion)
+		s.logger.Debug("JDK version %s already installed", majorVersion)
 		return "v" + majorVersion, nil
 	}
 
@@ -72,12 +75,12 @@ func (s *Service) Install(majorVersion string) (string, error) {
 		return "", err
 	}
 
-	s.logger.Info("Successfully installed JDK version: %s", versionStr)
+	s.logger.Debug("Successfully installed JDK version: %s", versionStr)
 	return versionStr, nil
 }
 
 func (s *Service) Use(version string, symlinkPath string) error {
-	s.logger.Info("Setting JDK version: %s", version)
+	s.logger.Debug("Setting JDK version: %s", version)
 
 	versionPath := filepath.Join(s.installDir, "java", version)
 	if !s.fs.Exists(versionPath) {
@@ -92,14 +95,7 @@ func (s *Service) Use(version string, symlinkPath string) error {
 		return err
 	}
 
-	// Update version manager through filesystem
-	cleanVersion := strings.TrimPrefix(version, "v")
-	versionMgr := s.fs.GetVersionManager()
-	if err := versionMgr.SetJavaVersion(cleanVersion); err != nil {
-		s.logger.Error("Failed to update version config: %v", err)
-	}
-
-	s.logger.Info("Successfully set JDK version: %s", version)
+	s.logger.Debug("Successfully set JDK version: %s", version)
 	return nil
 }
 
@@ -114,25 +110,44 @@ func (s *Service) List() ([]string, error) {
 		return nil, err
 	}
 
-	// Get current version from version manager
-	versionMgr := s.fs.GetVersionManager()
-	currentVersion, err := versionMgr.GetJavaVersion()
+	state, err := s.fs.GetState()
 	if err != nil {
-		s.logger.Error("Failed to get current JDK version: %v", err)
-		currentVersion = ""
+		s.logger.Error("Failed to create state reader for JDK: %v", err)
 	}
 
-	var versions []string
+	currentVersion := ""
+	if state != nil {
+		currentVersion, err = state.CurrentJavaVersion()
+		if err != nil {
+			s.logger.Error("Failed to get current JDK version: %v", err)
+			currentVersion = ""
+		}
+	}
+
+	var installed []string
 	for _, entry := range entries {
 		if entry.IsDir() {
-			version := entry.Name()
-			cleanVersion := strings.TrimPrefix(version, "v")
-			prefix := "   "
-			if cleanVersion == currentVersion || version == currentVersion {
-				prefix = "*  "
-			}
-			versions = append(versions, prefix+version)
+			installed = append(installed, entry.Name())
 		}
+	}
+
+	sort.Slice(installed, func(i, j int) bool {
+		left := installed[i]
+		right := installed[j]
+		if semver.IsValid(left) && semver.IsValid(right) {
+			return semver.Compare(left, right) < 0
+		}
+		return left < right
+	})
+
+	var versions []string
+	for _, version := range installed {
+		cleanVersion := strings.TrimPrefix(version, "v")
+		prefix := "   "
+		if cleanVersion == currentVersion || version == currentVersion {
+			prefix = "*  "
+		}
+		versions = append(versions, prefix+version)
 	}
 
 	return versions, nil
@@ -176,6 +191,9 @@ func (s *Service) downloadAndInstall(pkg AzulPackage, finalPath string) error {
 		s.fs.RemoveAll(extractDir)
 	}()
 
+	s.fs.RemoveAll(zipPath)
+	s.fs.RemoveAll(extractDir)
+
 	// Download
 	if err := s.downloader.Download(pkg.DownloadURL, zipPath); err != nil {
 		return err
@@ -217,12 +235,15 @@ func (s *Service) createVersionString(javaVersion []int) string {
 }
 
 func (s *Service) GetCurrentJDKVersion() (string, error) {
-	versionMgr := s.fs.GetVersionManager()
-	return versionMgr.GetJavaVersion()
+	state, err := s.fs.GetState()
+	if err != nil {
+		return "", err
+	}
+	return state.CurrentJavaVersion()
 }
 
 func (s *Service) Uninstall(majorVersion string) error {
-	s.logger.Info("Un-installing JDK version: %s", majorVersion)
+	s.logger.Debug("Un-installing JDK version: %s", majorVersion)
 
 	// Check if the environment is being set
 	currentVersion, err := s.GetCurrentJDKVersion()
@@ -241,25 +262,17 @@ func (s *Service) Uninstall(majorVersion string) error {
 		if s.fs.Exists(vVersionPath) {
 			versionPath = vVersionPath
 		} else {
-			s.logger.Info("JDK version %s not found", majorVersion)
+			s.logger.Debug("JDK version %s not found", majorVersion)
 			return nil
 		}
 	}
 
 	// Remove version
-	s.logger.Info("Removing JDK version %s from %s", majorVersion, versionPath)
+	s.logger.Debug("Removing JDK version %s from %s", majorVersion, versionPath)
 	if err := s.fs.RemoveAll(versionPath); err != nil {
 		return fmt.Errorf("failed to remove JDK version %s: %w", majorVersion, err)
 	}
 
-	// Clear from version manager if it was the current version
-	if currentVersion == majorVersion || currentVersion == "v"+majorVersion {
-		versionMgr := s.fs.GetVersionManager()
-		if err := versionMgr.ClearJavaVersion(); err != nil {
-			s.logger.Error("Failed to clear version from config: %v", err)
-		}
-	}
-
-	s.logger.Info("Successfully removed JDK version %s", majorVersion)
+	s.logger.Debug("Successfully removed JDK version %s", majorVersion)
 	return nil
 }

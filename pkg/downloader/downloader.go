@@ -3,6 +3,8 @@ package downloader
 import (
 	"aem/pkg/errors"
 	"aem/pkg/logger"
+	"aem/pkg/process"
+	"aem/pkg/progress"
 	"io"
 	"net/http"
 	"os"
@@ -22,9 +24,14 @@ func New(logger *logger.Logger) *Downloader {
 }
 
 func (d *Downloader) Download(url, destPath string) error {
-	d.logger.Info("Downloading from: %s", url)
+	d.logger.Debug("Downloading from: %s", url)
 
-	resp, err := d.client.Get(url)
+	req, err := http.NewRequestWithContext(process.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		return errors.NewDownloadError("failed to create HTTP request", err)
+	}
+
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return errors.NewDownloadError("failed to make HTTP request", err)
 	}
@@ -45,7 +52,10 @@ func (d *Downloader) Download(url, destPath string) error {
 	}
 	defer out.Close()
 
-	_, err = io.Copy(out, resp.Body)
+	tracker := progress.New("Downloading "+filepath.Base(destPath), resp.ContentLength)
+	defer tracker.Finish()
+
+	_, err = io.Copy(out, progress.NewWriter(resp.Body, tracker))
 	if err != nil {
 		return errors.NewDownloadError("failed to write downloaded content", err)
 	}
@@ -57,7 +67,12 @@ func (d *Downloader) Download(url, destPath string) error {
 func (d *Downloader) GetHTML(url string) (io.ReadCloser, error) {
 	d.logger.Debug("Fetching HTML from: %s", url)
 
-	resp, err := d.client.Get(url)
+	req, err := http.NewRequestWithContext(process.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		return nil, errors.NewDownloadError("failed to create HTTP request", err)
+	}
+
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, errors.NewDownloadError("failed to fetch HTML", err)
 	}
