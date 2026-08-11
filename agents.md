@@ -144,6 +144,8 @@ when it is implemented, tested, and its user-facing documentation is accurate.
 - [x] Add versioning, release artifacts, checksums, and installation guidance.
 - [x] Document supported providers, offline/cache behavior, upgrade policy, and
   troubleshooting.
+- [x] Bundle the build tag in every executable and add `aem update` to
+  self-upgrade from the newest verified release.
 
 ## Definition of done
 

@@ -260,6 +260,10 @@ the same environment integration as the release installer:
 ./scripts/build.sh --android-home /path/to/Android/sdk
 ```
 
+Source builds bundle the version reported by `git describe` (derived from the
+nearest tag), the commit, and the build date, so `aem version` identifies the
+exact checkout the executable came from.
+
 Pass `--aem-home PATH`, `--profile PATH`, or `--no-profile` as needed:
 
 ```bash
@@ -379,6 +383,24 @@ aem current
 aem doctor
 ```
 
+### Update AEM
+
+AEM keeps the version from the build tag bundled in the executable; check it
+with `aem version`. To upgrade the executable itself in place:
+
+```bash
+aem update --check   # report whether a newer release exists
+aem update           # download, verify, and install the newest release
+aem update --version 1.2.3   # switch to a specific release
+```
+
+The update targets the release assets published on the project's GitHub
+Releases page for the detected operating system and architecture, verifies the
+archive against the release checksums, and then swaps the running executable.
+The previous executable is restored automatically if the swap fails. Reinstall
+the same version, downgrade, or replace a development build by adding
+`--force`.
+
 ### Set Up the Current Project
 
 ```bash
@@ -402,6 +424,7 @@ If a requested dependency is missing, AEM downloads and installs it automaticall
 | `aem uninstall` | Remove an inactive runtime or Android SDK package           |
 | `aem current`   | Show currently active runtimes                              |
 | `aem doctor`    | Inspect local AEM environment                               |
+| `aem update`    | Self-update the aem executable to the newest release        |
 
 > Commands and flags may evolve during development. Run `aem --help` for the latest usage information.
 
@@ -902,9 +925,9 @@ making `aem setup` safe to repeat without re-downloading them.
 
 AEM never upgrades a project runtime merely because a newer release exists.
 Update the version in `aem.json` (or explicitly run `aem install`) and then
-activate or set up that version. Update AEM itself by installing a newer
-verified release archive or rebuilding a newer source checkout; verify the
-result with `aem version`.
+activate or set up that version. Update AEM itself with `aem update`, or by
+installing a newer verified release archive or rebuilding a newer source
+checkout; verify the result with `aem version`.
 
 ## Troubleshooting
 

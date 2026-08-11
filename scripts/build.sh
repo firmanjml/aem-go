@@ -118,10 +118,26 @@ temporary_dir="$(mktemp -d "${TMPDIR:-/tmp}/aem-build.XXXXXX")"
 temporary_binary="$temporary_dir/aem"
 trap 'rm -rf "$temporary_dir"' EXIT
 
-echo "Building AEM from $repo_root..."
+build_version="dev"
+build_commit="none"
+if command -v git >/dev/null 2>&1 && git -C "$repo_root" rev-parse --git-dir >/dev/null 2>&1; then
+  if described="$(git -C "$repo_root" describe --tags --always --dirty 2>/dev/null)"; then
+    build_version="${described#v}"
+  fi
+  build_commit="$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || printf 'none')"
+fi
+build_date="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+build_ldflags=(
+  -s -w
+  -X "aem/cmd.Version=${build_version}"
+  -X "aem/cmd.Commit=${build_commit}"
+  -X "aem/cmd.BuildDate=${build_date}"
+)
+
+echo "Building AEM ${build_version} from $repo_root..."
 (
   cd "$repo_root"
-  go build -trimpath -o "$temporary_binary" .
+  go build -trimpath -ldflags "${build_ldflags[*]}" -o "$temporary_binary" .
 )
 chmod 0755 "$temporary_binary"
 mv -f "$temporary_binary" "$bin_dir/aem"

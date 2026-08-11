@@ -351,6 +351,7 @@ func Execute() {
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(currentCmd)
 	rootCmd.AddCommand(doctorCmd)
+	rootCmd.AddCommand(newUpdateCmd())
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if log != nil {

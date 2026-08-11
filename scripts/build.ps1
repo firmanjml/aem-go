@@ -27,11 +27,26 @@ $targetBinary = Join-Path $binDir 'aem.exe'
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 $temporaryBinary = Join-Path ([System.IO.Path]::GetTempPath()) ('aem-build-' + [guid]::NewGuid().ToString() + '.exe')
 
+$buildVersion = 'dev'
+$buildCommit = 'none'
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $described = & git -C $repoRoot describe --tags --always --dirty 2>$null
+    if ($LASTEXITCODE -eq 0 -and $described) {
+        $buildVersion = ($described | Out-String).Trim() -replace '^v', ''
+    }
+    $shortCommit = & git -C $repoRoot rev-parse --short HEAD 2>$null
+    if ($LASTEXITCODE -eq 0 -and $shortCommit) {
+        $buildCommit = ($shortCommit | Out-String).Trim()
+    }
+}
+$buildDate = [DateTime]::UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+$ldflags = "-s -w -X aem/cmd.Version=$buildVersion -X aem/cmd.Commit=$buildCommit -X aem/cmd.BuildDate=$buildDate"
+
 try {
-    Write-Host "Building AEM from $repoRoot..."
+    Write-Host "Building AEM $buildVersion from $repoRoot..."
     Push-Location $repoRoot
     try {
-        & go build -trimpath -o $temporaryBinary .
+        & go build -trimpath -ldflags $ldflags -o $temporaryBinary .
         if ($LASTEXITCODE -ne 0) {
             throw "Go build failed with exit code $LASTEXITCODE."
         }
