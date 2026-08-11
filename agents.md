@@ -42,7 +42,7 @@ declares and make repeated setup runs safe.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "runtime": {
     "node": "20.19.4",
     "java": "17"

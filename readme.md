@@ -180,7 +180,7 @@ AEM installs and reports these managed Android SDK components:
 ### Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firmanjml/aem-go/refs/heads/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/refs/heads/main/scripts/install.sh | bash
 ```
 
 On macOS and Linux, the installer downloads the matching released `aem` binary,
@@ -191,7 +191,7 @@ or Zsh profile. Open a new terminal after it completes.
 On Windows, run this in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/firmanjml/aem-go/refs/heads/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/refs/heads/main/scripts/install.ps1 | iex
 ```
 
 The Windows installer downloads and verifies the matching released binary, then
@@ -227,7 +227,7 @@ the selected `AEM_HOME` directory and every AEM-managed runtime and SDK.
 
 Tagged releases publish standalone archives for Linux, macOS, and Windows
 (AMD64 and ARM64 where supported). Download the archive matching your machine
-from the [GitHub Releases page](https://github.com/firmanjml/aem-go/releases),
+from the [GitHub Releases page](https://github.com/Adaptive-Cloud/aem-go/releases),
 then verify it against the published `checksums.txt` before adding the extracted
 directory to your `PATH`. Use `aem version` to see the installed build version,
 commit, and build date.
@@ -258,7 +258,7 @@ intentionally minimal:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "runtime": {},
   "android": {},
   "hooks": {}
@@ -370,7 +370,7 @@ AEM does not attempt to determine the React Native version or infer dependency v
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "runtime": {
     "node": "20.19.4",
     "java": "17"
@@ -434,7 +434,7 @@ For example, a project may only require Node.js:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "runtime": {
     "node": "20.19.4"
   }
@@ -445,7 +445,7 @@ Or Node.js and Java:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "runtime": {
     "node": "20.19.4",
     "java": "17"
@@ -457,7 +457,7 @@ Android components can be added when required:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "runtime": {
     "node": "20.19.4",
     "java": "17"
@@ -488,7 +488,7 @@ Specify Android API levels:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "android": {
     "platforms": [
       "34",
@@ -516,7 +516,7 @@ Specify Build Tools versions:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "android": {
     "buildTools": [
       "34.0.0",
@@ -544,7 +544,7 @@ Specify NDK versions:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "android": {
     "ndk": [
       "25.1.8937393",
@@ -572,7 +572,7 @@ Specify CMake versions:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "android": {
     "cmake": [
       "3.22.1"
@@ -599,7 +599,7 @@ System images use structured configuration because the Android package identifie
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "android": {
     "systemImages": [
       {
@@ -670,7 +670,7 @@ The optional `hooks` object defines lifecycle hooks around `aem setup`:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "hooks": {
     "preSetup": [],
     "postSetup": []
@@ -887,7 +887,7 @@ For example, if a developer specifies:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$schema": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "runtime": {
     "node": "20.19.4",
     "java": "17"

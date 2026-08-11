@@ -15,7 +15,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$githubRepository = 'firmanjml/aem-go'
+$githubRepository = 'Adaptive-Cloud/aem-go'
 
 if ($Version -ne 'latest' -and $Version -notmatch '^[0-9A-Za-z._-]+$') {
     throw "Invalid version: $Version"

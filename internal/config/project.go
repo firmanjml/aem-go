@@ -10,7 +10,7 @@ import (
 
 const (
 	ProjectConfigFileName = "aem.json"
-	SchemaURL             = "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json"
+	SchemaURL             = "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json"
 )
 
 type ProjectConfig struct {

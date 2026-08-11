@@ -37,7 +37,7 @@ android_home="${ANDROID_HOME:-}"
 profile=""
 update_profile=1
 release_version="latest"
-github_repository="firmanjml/aem-go"
+github_repository="Adaptive-Cloud/aem-go"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in

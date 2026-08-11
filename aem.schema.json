@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "$id": "https://raw.githubusercontent.com/Adaptive-Cloud/aem-go/main/aem.schema.json",
   "title": "Adaptive Environment Manager project configuration",
   "type": "object",
   "additionalProperties": false,
