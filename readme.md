@@ -1,4 +1,4 @@
-# Adaptive Environment Manager (AEM) [WORK IN PROGRESS 🏗️]
+# Adaptive Environment Manager (AEM)
 
 Adaptive Environment Manager (AEM) is a tool designed to simplify and automate the management of development environment dependencies such as Node.js, Java, and Android SDK components.
 
@@ -7,7 +7,6 @@ AEM is especially useful for developers working with frameworks such as React Na
 By automating environment setup and version management, AEM enables developers to spend less time configuring development environments and more time building software.
 
 ![AEM Demo](https://github.com/user-attachments/assets/3c0c3acb-6317-408e-b37e-75eba5ea69b5)
-
 ![AEM Setup](https://github.com/user-attachments/assets/e0c73c67-5a52-4be0-a61f-25a8de93051d)
 
 ## Table of Contents
@@ -182,7 +181,7 @@ AEM installs and reports these managed Android SDK components:
 ### Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/firmanjml/aem-go/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/firmanjml/aem-go/refs/heads/main/scripts/install.sh | bash
 ```
 
 On macOS and Linux, the installer downloads the matching released `aem` binary,
@@ -190,10 +189,10 @@ verifies it against the published checksum, installs it to
 `$AEM_HOME/bin/aem` (default: `~/.aem/bin/aem`), and updates the detected Bash
 or Zsh profile. Open a new terminal after it completes.
 
-On Windows, run PowerShell:
+On Windows, run this in PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/firmanjml/aem-go/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/firmanjml/aem-go/refs/heads/main/scripts/install.ps1 | iex
 ```
 
 The Windows installer downloads and verifies the matching released binary, then
