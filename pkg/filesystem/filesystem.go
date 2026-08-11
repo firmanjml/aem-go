@@ -71,7 +71,7 @@ func (fs *FileSystem) CreateSymlink(link, target string) error {
 	// the configured link path. A custom AEM_*_SYMLINK path may point anywhere
 	// on disk, so treating every existing path as replaceable would be unsafe.
 	if info, err := os.Lstat(link); err == nil {
-		if info.Mode()&os.ModeSymlink == 0 {
+		if !isReplaceableLink(link, info) {
 			return errors.NewFileSystemError("refusing to replace non-symlink path", nil)
 		}
 		if err := os.Remove(link); err != nil {
