@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -126,6 +128,145 @@ func TestSetupInstallsOnlyMissingPackagesWithoutNetwork(t *testing.T) {
 	}
 	if licenseCalls != 1 || installCalls != 1 {
 		t.Fatalf("idempotent setup calls = licenses %d, installs %d; want 1, 1", licenseCalls, installCalls)
+	}
+}
+
+func TestInstallInstallsRawPackageIDAndIsIdempotent(t *testing.T) {
+	service := NewService(logger.New(false), t.TempDir())
+	t.Setenv("ANDROID_HOME", "")
+	t.Setenv("ANDROID_SDK_ROOT", "")
+	sdkRoot := service.SDKRoot()
+	if err := os.MkdirAll(filepath.Dir(service.sdkManagerPath(sdkRoot)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.sdkManagerPath(sdkRoot), []byte("placeholder"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var licenseCalls, installCalls int
+	service.runCommand = func(root, javaHome string, args ...string) ([]byte, error) {
+		if root != sdkRoot {
+			t.Fatalf("SDK root = %q, want %q", root, sdkRoot)
+		}
+		if len(args) == 2 && args[1] == "--licenses" {
+			licenseCalls++
+			return nil, nil
+		}
+		installCalls++
+		if got, want := args, []string{"--sdk_root=" + sdkRoot, "platforms;android-37.1"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("sdkmanager arguments = %q, want %q", got, want)
+		}
+		path, ok := androidPackagePath(sdkRoot, args[1])
+		if !ok {
+			t.Fatalf("package %q has no SDK path", args[1])
+		}
+		return nil, os.MkdirAll(path, 0o755)
+	}
+
+	if err := service.Install("platforms;android-37.1", ""); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if err := service.Install("platforms;android-37.1", ""); err != nil {
+		t.Fatalf("second Install() error = %v", err)
+	}
+	if licenseCalls != 1 || installCalls != 1 {
+		t.Fatalf("calls = licenses %d, installs %d; want 1, 1", licenseCalls, installCalls)
+	}
+}
+
+func TestInstallRejectsInvalidPackageID(t *testing.T) {
+	service := NewService(logger.New(false), t.TempDir())
+	for _, packageID := range []string{"", "--licenses", "platforms;android-35 extra"} {
+		if err := service.Install(packageID, ""); err == nil {
+			t.Errorf("Install(%q) succeeded, want validation error", packageID)
+		}
+	}
+}
+
+func TestUninstallRemovesInstalledPackageAndIsIdempotent(t *testing.T) {
+	service := NewService(logger.New(false), t.TempDir())
+	t.Setenv("ANDROID_HOME", "")
+	t.Setenv("ANDROID_SDK_ROOT", "")
+	sdkRoot := service.SDKRoot()
+	packageID := "system-images;android-37.1;google_apis_playstore_ps16k;arm64-v8a"
+	packagePath, ok := androidPackagePath(sdkRoot, packageID)
+	if !ok {
+		t.Fatalf("androidPackagePath(%q) did not resolve", packageID)
+	}
+	if err := os.MkdirAll(packagePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(service.sdkManagerPath(sdkRoot)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(service.sdkManagerPath(sdkRoot), []byte("placeholder"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var calls int
+	service.runCommand = func(root, javaHome string, args ...string) ([]byte, error) {
+		calls++
+		want := []string{"--sdk_root=" + sdkRoot, "--uninstall", packageID}
+		if !reflect.DeepEqual(args, want) {
+			t.Fatalf("sdkmanager arguments = %q, want %q", args, want)
+		}
+		return nil, os.RemoveAll(packagePath)
+	}
+
+	if err := service.Uninstall(packageID, ""); err != nil {
+		t.Fatalf("Uninstall() error = %v", err)
+	}
+	if err := service.Uninstall(packageID, ""); err != nil {
+		t.Fatalf("second Uninstall() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("sdkmanager calls = %d, want 1", calls)
+	}
+	if service.fs.Exists(packagePath) {
+		t.Fatalf("package remains at %s", packagePath)
+	}
+}
+
+func TestUninstallRetainsCommandLineTools(t *testing.T) {
+	service := NewService(logger.New(false), t.TempDir())
+	if err := service.Uninstall("cmdline-tools;latest", ""); err == nil {
+		t.Fatal("Uninstall() allowed removal of Android command-line tools")
+	}
+}
+
+func TestSDKManagerCapturesPackageInstallationOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test helper uses a POSIX shell script")
+	}
+
+	service := NewService(logger.New(false), t.TempDir())
+	t.Setenv("ANDROID_HOME", "")
+	t.Setenv("ANDROID_SDK_ROOT", "")
+	sdkRoot := service.SDKRoot()
+	sdkManager := service.sdkManagerPath(sdkRoot)
+	if err := os.MkdirAll(filepath.Dir(sdkManager), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sdkManager, []byte("#!/bin/sh\necho downloading\necho extracting >&2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	output, err := service.runSDKManagerCommand(sdkRoot, "", "--sdk_root="+sdkRoot, "platform-tools")
+	if err != nil {
+		t.Fatalf("runSDKManagerCommand() error = %v", err)
+	}
+	for _, message := range []string{"downloading", "extracting"} {
+		if !strings.Contains(string(output), message) {
+			t.Errorf("captured output = %q, want %q", output, message)
+		}
+	}
+}
+
+func TestSDKManagerErrorDetailExcludesTransientProgress(t *testing.T) {
+	output := "Loading package information...\r[===                                    ] 10% Computing updates...\rWarning: Failed to find package 'system-images;android-37.1;google_apis_playstore;arm64-v8a'\n"
+	const want = "Warning: Failed to find package 'system-images;android-37.1;google_apis_playstore;arm64-v8a'"
+	if got := sdkManagerErrorDetail(output); got != want {
+		t.Fatalf("sdkManagerErrorDetail() = %q, want %q", got, want)
 	}
 }
 

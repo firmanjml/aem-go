@@ -89,6 +89,16 @@ AEM can automate Android development environment setup, including:
 * Android SDK command-line tools
 * Android Platform Tools
 
+Install an individual Android component by its raw `sdkmanager` package ID;
+AEM handles the command-line tools, license acceptance, and installation:
+
+```bash
+aem install android "platforms;android-37.1"
+```
+
+Quote package IDs containing `;` so the shell passes them to AEM as one
+argument. The semicolon is interpreted by shells as a command separator.
+
 ### Project-Aware Setup
 
 Projects can define their required environment in an `aem.json` file.
@@ -168,6 +178,14 @@ AEM installs and reports these managed Android SDK components:
 * NDK
 * CMake
 * System images
+
+Remove an individual Android component by its raw `sdkmanager` package ID.
+The command-line tools remain installed because AEM uses them to manage other
+components:
+
+```bash
+aem uninstall android "platforms;android-37.1"
+```
 * Platform Tools
 * Command-line Tools
 
@@ -231,6 +249,36 @@ from the [GitHub Releases page](https://github.com/Adaptive-Cloud/aem-go/release
 then verify it against the published `checksums.txt` before adding the extracted
 directory to your `PATH`. Use `aem version` to see the installed build version,
 commit, and build date.
+
+### Build from Source
+
+From a local AEM checkout, build and install the executable without downloading
+a release from source control. It installs AEM in `AEM_HOME/bin` and configures
+the same environment integration as the release installer:
+
+```bash
+./scripts/build.sh --android-home /path/to/Android/sdk
+```
+
+Pass `--aem-home PATH`, `--profile PATH`, or `--no-profile` as needed:
+
+```bash
+./scripts/build.sh --aem-home "$HOME/.aem-dev" --no-profile --android-home /path/to/Android/sdk
+```
+
+On Windows, run the PowerShell equivalent:
+
+```powershell
+.\scripts\build.ps1
+```
+
+It installs `aem.exe` in `AEM_HOME\bin` and configures the same persistent
+user environment variables as `install.ps1`. Pass `-AemHome PATH` to choose a
+different AEM home:
+
+```powershell
+.\scripts\build.ps1 -AemHome C:\Users\you\.aem-dev
+```
 
 ## Usage
 
@@ -313,6 +361,7 @@ aem list android
 ```bash
 aem uninstall node 20.11.1
 aem uninstall java 17.0.15
+aem uninstall android "platforms;android-37.1"
 ```
 
 For safety, AEM refuses to remove a runtime selected through `aem use` or
@@ -346,11 +395,11 @@ If a requested dependency is missing, AEM downloads and installs it automaticall
 | --------------- | ----------------------------------------------------------- |
 | `aem init`      | Interactively create and validate a canonical `aem.json`    |
 | `aem setup`     | Install and configure the environment defined by `aem.json` |
-| `aem install`   | Install a specific version                                  |
+| `aem install`   | Install a Node/Java version or raw Android SDK package ID   |
 | `aem list`      | List installed versions                                     |
 | `aem use`       | Switch the active version                                   |
 | `aem available` | List available remote versions                              |
-| `aem uninstall` | Remove an inactive AEM-managed runtime                      |
+| `aem uninstall` | Remove an inactive runtime or Android SDK package           |
 | `aem current`   | Show currently active runtimes                              |
 | `aem doctor`    | Inspect local AEM environment                               |
 

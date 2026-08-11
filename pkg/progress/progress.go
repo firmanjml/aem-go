@@ -16,6 +16,7 @@ type Tracker struct {
 	label     string
 	total     int64
 	current   int64
+	percent   bool
 	lastPrint time.Time
 	done      bool
 	mu        sync.Mutex
@@ -25,6 +26,7 @@ type stageState struct {
 	label   string
 	total   int64
 	current int64
+	percent bool
 	done    bool
 }
 
@@ -46,10 +48,17 @@ var defaultManager = &manager{
 
 func New(label string, total int64) *Tracker {
 	slot, stage := inferSlotAndStage(label)
-	return defaultManager.newTracker(slot, stage, label, total)
+	return defaultManager.newTracker(slot, stage, label, total, false)
 }
 
-func (m *manager) newTracker(slot, stage, label string, total int64) *Tracker {
+// NewPercent creates a percentage-only tracker. It is useful when the source
+// reports completion percentages but does not expose a byte total.
+func NewPercent(label string) *Tracker {
+	slot, stage := inferSlotAndStage(label)
+	return defaultManager.newTracker(slot, stage, label, 100, true)
+}
+
+func (m *manager) newTracker(slot, stage, label string, total int64, percent bool) *Tracker {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -67,18 +76,43 @@ func (m *manager) newTracker(slot, stage, label string, total int64) *Tracker {
 		label:   label,
 		total:   total,
 		current: 0,
+		percent: percent,
 		done:    false,
 	}
 
 	tracker := &Tracker{
-		slot:  slot,
-		stage: stage,
-		label: label,
-		total: total,
+		slot:    slot,
+		stage:   stage,
+		label:   label,
+		total:   total,
+		percent: percent,
 	}
 
 	m.renderLocked()
 	return tracker
+}
+
+// Set updates a tracker with an absolute value. Unlike Add, it supports
+// sources that reset their percentage for each sub-step.
+func (t *Tracker) Set(current int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.done {
+		return
+	}
+	if current < 0 {
+		current = 0
+	}
+	if t.total > 0 && current > t.total {
+		current = t.total
+	}
+	t.current = current
+	if !t.shouldRender() {
+		return
+	}
+
+	defaultManager.updateTracker(t)
 }
 
 func (t *Tracker) Add(delta int64) {
@@ -129,6 +163,7 @@ func (m *manager) updateTracker(t *Tracker) {
 		label:   t.label,
 		total:   t.total,
 		current: t.current,
+		percent: t.percent,
 		done:    t.done,
 	}
 	t.lastPrint = time.Now()
@@ -157,6 +192,9 @@ func (m *manager) renderLocked() {
 
 func renderSlot(slot *slotState) string {
 	parts := []string{slot.name}
+	if stage, ok := slot.stages["remove"]; ok {
+		return strings.Join(append(parts, "remove "+renderStage(stage)), " | ")
+	}
 
 	parts = append(parts, "download "+renderStageOrPending(slot.stages, "download"))
 	parts = append(parts, "extract "+renderStageOrPending(slot.stages, "extract"))
@@ -192,6 +230,9 @@ func renderStage(stage stageState) string {
 		filled = barWidth
 	}
 	bar := strings.Repeat("#", filled) + strings.Repeat("-", barWidth-filled)
+	if stage.percent {
+		return fmt.Sprintf("[%s] %3d%%", bar, percent)
+	}
 
 	return fmt.Sprintf("[%s] %3d%% (%s/%s)", bar, percent, humanizeBytes(stage.current), humanizeBytes(stage.total))
 }
@@ -223,6 +264,10 @@ func inferSlotAndStage(label string) (string, string) {
 	switch {
 	case strings.HasPrefix(lower, "downloading "):
 		stage = "download"
+	case strings.HasPrefix(lower, "installing "):
+		stage = "download"
+	case strings.HasPrefix(lower, "removing "):
+		stage = "remove"
 	case strings.HasPrefix(lower, "extracting "):
 		stage = "extract"
 	}

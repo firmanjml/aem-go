@@ -131,7 +131,7 @@ var listCmd = &cobra.Command{
 
 var installCmd = &cobra.Command{
 	Use:   "install [module] [version]",
-	Short: "Install a Java or Node version",
+	Short: "Install a Node or Java version, or an Android SDK package",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		module := args[0]
@@ -158,6 +158,13 @@ var installCmd = &cobra.Command{
 				return err
 			}
 			fmt.Printf("Installed java %s\n", strings.TrimPrefix(installedVersion, "v"))
+			return nil
+		case "android":
+			service := androidsvc.NewService(log, installDir)
+			if err := service.Install(version, os.Getenv("JAVA_HOME")); err != nil {
+				return err
+			}
+			fmt.Printf("Installed Android SDK package %s\n", version)
 			return nil
 		default:
 			return fmt.Errorf("%s module does not exist", module)
@@ -210,7 +217,7 @@ var useCmd = &cobra.Command{
 
 var uninstallCmd = &cobra.Command{
 	Use:   "uninstall [module] [version]",
-	Short: "Remove an installed runtime that is not active",
+	Short: "Remove an installed runtime or Android SDK package",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		installDir, err := fs.GetInstallDir()
@@ -223,11 +230,17 @@ var uninstallCmd = &cobra.Command{
 			err = nodesvc.NewService(log, installDir).Uninstall(args[1])
 		case "java":
 			err = javasvc.NewService(log, installDir).Uninstall(args[1])
+		case "android":
+			err = androidsvc.NewService(log, installDir).Uninstall(args[1], os.Getenv("JAVA_HOME"))
 		default:
 			return fmt.Errorf("%s module does not exist", args[0])
 		}
 		if err != nil {
 			return err
+		}
+		if args[0] == "android" {
+			fmt.Printf("Uninstalled Android SDK package %s\n", args[1])
+			return nil
 		}
 		fmt.Printf("Uninstalled %s %s\n", args[0], strings.TrimPrefix(args[1], "v"))
 		return nil

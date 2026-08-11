@@ -8,12 +8,15 @@ import (
 	"aem/pkg/errors"
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
+	"aem/pkg/progress"
 	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -85,6 +88,82 @@ func NewService(logger *logger.Logger, installDir string) *Service {
 	return s
 }
 
+// Install installs one Android SDK package using its sdkmanager package ID.
+// It owns command-line tools bootstrapping and license acceptance so callers do
+// not need to invoke sdkmanager directly.
+func (s *Service) Install(packageID, javaHome string) error {
+	packageID = strings.TrimSpace(packageID)
+	if err := validatePackageID(packageID); err != nil {
+		return err
+	}
+
+	sdkRoot := s.SDKRoot()
+	if err := s.fs.EnsureDir(sdkRoot); err != nil {
+		return err
+	}
+	if err := s.ensureCommandLineTools(sdkRoot); err != nil {
+		return err
+	}
+
+	installed, err := s.packageInstalled(sdkRoot, packageID)
+	if err != nil {
+		return err
+	}
+	if installed {
+		s.logger.Debug("Android SDK package %s is already installed", packageID)
+		return nil
+	}
+
+	s.logger.Info("Accepting Android SDK licenses")
+	if err := s.acceptLicenses(sdkRoot, javaHome); err != nil {
+		return err
+	}
+	s.logger.Info("Installing Android SDK package: %s", packageID)
+	if err := s.installPackages(sdkRoot, javaHome, []string{packageID}); err != nil {
+		return err
+	}
+
+	s.logger.Debug("Android SDK package %s is ready in %s", packageID, sdkRoot)
+	return nil
+}
+
+// Uninstall removes one installed Android SDK package using its sdkmanager
+// package ID. The command-line tools are retained because AEM needs them to
+// manage every other Android SDK component.
+func (s *Service) Uninstall(packageID, javaHome string) error {
+	packageID = strings.TrimSpace(packageID)
+	if err := validatePackageID(packageID); err != nil {
+		return err
+	}
+	if packageID == "cmdline-tools;latest" {
+		return fmt.Errorf("cannot uninstall Android command-line tools; they are required to manage Android SDK packages")
+	}
+
+	sdkRoot := s.SDKRoot()
+	installed, err := s.packageInstalled(sdkRoot, packageID)
+	if err != nil {
+		return err
+	}
+	if !installed {
+		s.logger.Debug("Android SDK package %s is not installed", packageID)
+		return nil
+	}
+
+	if !s.fs.Exists(s.sdkManagerPath(sdkRoot)) {
+		return fmt.Errorf("Android command-line tools are not installed in %s", sdkRoot)
+	}
+
+	s.logger.Info("Removing Android SDK package: %s", packageID)
+	args := []string{"--sdk_root=" + sdkRoot, "--uninstall", packageID}
+	output, err := s.runCommand(sdkRoot, javaHome, args...)
+	if err != nil {
+		return commandError("failed to uninstall Android SDK package", err, output)
+	}
+
+	s.logger.Debug("Android SDK package %s was removed from %s", packageID, sdkRoot)
+	return nil
+}
+
 func (s *Service) Setup(cfg config.AndroidConfig, javaHome string) error {
 	requestedPackages := requestedAndroidPackages(cfg)
 	if len(requestedPackages) == 0 {
@@ -107,10 +186,12 @@ func (s *Service) Setup(cfg config.AndroidConfig, javaHome string) error {
 		return nil
 	}
 
+	s.logger.Info("Accepting Android SDK licenses")
 	if err := s.acceptLicenses(sdkRoot, javaHome); err != nil {
 		return err
 	}
 
+	s.logger.Info("Installing %d Android SDK package(s): %s", len(missingPackages), strings.Join(missingPackages, ", "))
 	if err := s.installPackages(sdkRoot, javaHome, missingPackages); err != nil {
 		return err
 	}
@@ -383,7 +464,7 @@ func (s *Service) resolveCommandLineToolsURL() (string, error) {
 func (s *Service) acceptLicenses(sdkRoot, javaHome string) error {
 	output, err := s.runCommand(sdkRoot, javaHome, "--sdk_root="+sdkRoot, "--licenses")
 	if err != nil {
-		return fmt.Errorf("failed to accept Android SDK licenses: %w: %s", err, strings.TrimSpace(string(output)))
+		return commandError("failed to accept Android SDK licenses", err, output)
 	}
 
 	return nil
@@ -395,7 +476,7 @@ func (s *Service) installPackages(sdkRoot, javaHome string, packages []string) e
 
 	output, err := s.runCommand(sdkRoot, javaHome, args...)
 	if err != nil {
-		return fmt.Errorf("failed to install Android SDK packages: %w: %s", err, strings.TrimSpace(string(output)))
+		return commandError("failed to install Android SDK packages", err, output)
 	}
 
 	return nil
@@ -406,8 +487,79 @@ func (s *Service) runSDKManagerCommand(sdkRoot, javaHome string, args ...string)
 	cmd.Env = s.commandEnv(sdkRoot, javaHome)
 	if len(args) > 1 && args[1] == "--licenses" {
 		cmd.Stdin = strings.NewReader(strings.Repeat("y\n", 32))
+		return cmd.CombinedOutput()
 	}
-	return cmd.CombinedOutput()
+
+	// sdkmanager reports progress as terminal-specific bars. Convert those
+	// percentages into AEM's shared progress display rather than mixing two UI
+	// formats on the same command line.
+	label := "Installing Android SDK packages"
+	if len(args) > 1 && args[1] == "--uninstall" {
+		label = "Removing Android SDK packages"
+	}
+	tracker := progress.NewPercent(label)
+	output := &sdkManagerOutputWriter{tracker: tracker}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	err := cmd.Run()
+	if err == nil {
+		tracker.Finish()
+	}
+	return []byte(output.output.String()), err
+}
+
+var sdkManagerProgressPattern = regexp.MustCompile(`\[[^\]\r\n]*\]\s*(\d{1,3})%`)
+
+// sdkManagerOutputWriter captures sdkmanager output for error reporting and
+// extracts its percentage updates without echoing its terminal-specific bars.
+type sdkManagerOutputWriter struct {
+	output  strings.Builder
+	pending string
+	tracker *progress.Tracker
+}
+
+func (w *sdkManagerOutputWriter) Write(p []byte) (int, error) {
+	text := string(p)
+	_, _ = w.output.WriteString(text)
+
+	updates := w.pending + text
+	for _, match := range sdkManagerProgressPattern.FindAllStringSubmatch(updates, -1) {
+		percentage, err := strconv.ParseInt(match[1], 10, 64)
+		if err == nil {
+			w.tracker.Set(percentage)
+		}
+	}
+
+	const maxPendingOutput = 1024
+	if len(updates) > maxPendingOutput {
+		updates = updates[len(updates)-maxPendingOutput:]
+	}
+	w.pending = updates
+	return len(p), nil
+}
+
+func commandError(operation string, err error, output []byte) error {
+	if detail := sdkManagerErrorDetail(string(output)); detail != "" {
+		return fmt.Errorf("%s: %w: %s", operation, err, detail)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
+}
+
+func sdkManagerErrorDetail(output string) string {
+	var details []string
+	seen := make(map[string]struct{})
+	for _, line := range strings.FieldsFunc(output, func(r rune) bool { return r == '\r' || r == '\n' }) {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "Warning:") && !strings.HasPrefix(line, "Error:") {
+			continue
+		}
+		if _, exists := seen[line]; exists {
+			continue
+		}
+		seen[line] = struct{}{}
+		details = append(details, line)
+	}
+	return strings.Join(details, " ")
 }
 
 func (s *Service) missingPackages(sdkRoot string, packages []string) []string {
@@ -419,6 +571,33 @@ func (s *Service) missingPackages(sdkRoot string, packages []string) []string {
 		}
 	}
 	return missing
+}
+
+func (s *Service) packageInstalled(sdkRoot, packageID string) (bool, error) {
+	if path, known := androidPackagePath(sdkRoot, packageID); known && s.fs.Exists(path) {
+		return true, nil
+	}
+
+	packages, err := s.ListAt(sdkRoot)
+	if err != nil {
+		return false, err
+	}
+	for _, installed := range packages {
+		if installed == packageID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func validatePackageID(packageID string) error {
+	if packageID == "" {
+		return fmt.Errorf("Android SDK package identifier cannot be empty")
+	}
+	if strings.HasPrefix(packageID, "-") || strings.ContainsAny(packageID, "\r\n\t ") {
+		return fmt.Errorf("invalid Android SDK package identifier %q", packageID)
+	}
+	return nil
 }
 
 func (s *Service) sdkManagerPath(sdkRoot string) string {
