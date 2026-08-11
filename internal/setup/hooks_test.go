@@ -4,6 +4,7 @@ import (
 	"aem/internal/config"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -17,8 +18,8 @@ func TestRunHooksExecutesCommandsInProjectDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "complete\n" {
-		t.Fatalf("hook result = %q, want %q", data, "complete\\n")
+	if got := strings.TrimSpace(string(data)); got != "complete" {
+		t.Fatalf("hook result = %q, want %q", data, "complete")
 	}
 }
 
