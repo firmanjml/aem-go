@@ -6,8 +6,7 @@ AEM is especially useful for developers working with frameworks such as React Na
 
 By automating environment setup and version management, AEM enables developers to spend less time configuring development environments and more time building software.
 
-![AEM Demo](https://github.com/user-attachments/assets/3c0c3acb-6317-408e-b37e-75eba5ea69b5)
-![AEM Setup](https://github.com/user-attachments/assets/e0c73c67-5a52-4be0-a61f-25a8de93051d)
+[AEM Demo](https://github.com/user-attachments/assets/216dd516-6744-480b-aecd-a063334166c1)
 
 ## Table of Contents
 
