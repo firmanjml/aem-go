@@ -34,10 +34,23 @@ try {
         $releaseApi = "https://api.github.com/repos/$githubRepository/releases/tags/v$Version"
     }
     $release = Invoke-RestMethod -Uri $releaseApi -Headers @{ Accept = 'application/vnd.github+json' }
-    $architecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
-        'X64' { 'amd64' }
-        'Arm64' { 'arm64' }
-        default { throw "Unsupported CPU architecture: $([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)" }
+    # PROCESSOR_ARCHITEW6432 reports the native architecture when this script is
+    # running in a 32-bit PowerShell process on 64-bit Windows. Avoid relying on
+    # RuntimeInformation here: its OSArchitecture value is null on some older
+    # Windows PowerShell/.NET combinations.
+    $processorArchitecture = if ($env:PROCESSOR_ARCHITEW6432) {
+        $env:PROCESSOR_ARCHITEW6432
+    }
+    elseif ($env:PROCESSOR_ARCHITECTURE) {
+        $env:PROCESSOR_ARCHITECTURE
+    }
+    else {
+        throw 'Could not determine the Windows processor architecture. Set PROCESSOR_ARCHITECTURE and retry.'
+    }
+    $architecture = switch -Regex ($processorArchitecture) {
+        '^(AMD64|X64)$' { 'amd64'; break }
+        '^ARM64$' { 'arm64'; break }
+        default { throw "Unsupported CPU architecture: $processorArchitecture" }
     }
     $archiveVersion = $release.tag_name -replace '^v', ''
     $archiveName = "aem_${archiveVersion}_windows_${architecture}.zip"
