@@ -7,8 +7,11 @@ import (
 	"aem/pkg/errors"
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
+	"aem/pkg/state"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -22,7 +25,10 @@ type Service struct {
 	downloader *downloader.Downloader
 	fs         *filesystem.FileSystem
 	extractor  *archiver.ZipExtractor
+	tarGz      *archiver.TarGzExtractor
 	installDir string
+	apiURL     string
+	platform   platform.Info
 }
 
 type AzulPackage struct {
@@ -32,30 +38,42 @@ type AzulPackage struct {
 }
 
 func NewService(logger *logger.Logger, installDir string) *Service {
+	return newService(logger, installDir, "https://api.azul.com/metadata/v1/zulu/packages/", platform.GetInfo())
+}
+
+// newService permits package-level integration tests to use a local provider
+// endpoint and explicit cross-platform target without real installations.
+func newService(log *logger.Logger, installDir, apiURL string, target platform.Info) *Service {
 	return &Service{
-		logger:     logger,
-		downloader: downloader.New(logger),
-		fs:         filesystem.New(logger),
-		extractor:  archiver.NewZipExtractor(logger),
+		logger:     log,
+		downloader: downloader.New(log),
+		fs:         filesystem.New(log),
+		extractor:  archiver.NewZipExtractor(log),
+		tarGz:      archiver.NewTarGzExtractor(log),
 		installDir: installDir,
+		apiURL:     apiURL,
+		platform:   target,
 	}
 }
 
 func (s *Service) Install(majorVersion string) (string, error) {
+	majorVersion = normalizeRequestedVersion(majorVersion)
+	if majorVersion == "" {
+		return "", errors.NewValidationError("JDK version is required")
+	}
 	s.logger.Debug("Installing JDK version: %s", majorVersion)
 
-	// Check if already installed
-	versionPath := filepath.Join(s.installDir, "java", "v"+majorVersion)
-	if s.fs.Exists(versionPath) {
-		s.logger.Debug("JDK version %s already installed", majorVersion)
-		return "v" + majorVersion, nil
+	installedVersion, err := s.findInstalledVersion(majorVersion)
+	if err != nil {
+		return "", err
+	}
+	if installedVersion != "" {
+		s.logger.Debug("JDK version %s already installed", installedVersion)
+		return installedVersion, nil
 	}
 
-	// Get platform info
-	platform := platform.GetInfo()
-
 	// Fetch available packages
-	packages, err := s.fetchPackages(majorVersion, platform)
+	packages, err := s.fetchPackages(majorVersion, s.platform)
 	if err != nil {
 		return "", err
 	}
@@ -79,7 +97,43 @@ func (s *Service) Install(majorVersion string) (string, error) {
 	return versionStr, nil
 }
 
+// findInstalledVersion treats a requested major or minor version as a stable
+// constraint. Once a matching JDK is installed, setup reuses it instead of
+// silently downloading a newer patch release on every invocation.
+func (s *Service) findInstalledVersion(requested string) (string, error) {
+	javaDir := filepath.Join(s.installDir, "java")
+	if !s.fs.Exists(javaDir) {
+		return "", nil
+	}
+	entries, err := s.fs.ListDir(javaDir)
+	if err != nil {
+		return "", err
+	}
+	prefix := "v" + requested
+	candidates := make([]string, 0)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		version := entry.Name()
+		if version == prefix || strings.HasPrefix(version, prefix+".") {
+			candidates = append(candidates, version)
+		}
+	}
+	if len(candidates) == 0 {
+		return "", nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return semver.Compare(candidates[i], candidates[j]) > 0
+	})
+	return candidates[0], nil
+}
+
 func (s *Service) Use(version string, symlinkPath string) error {
+	version = normalizeInstalledVersion(version)
+	if version == "v" {
+		return errors.NewValidationError("JDK version is required")
+	}
 	s.logger.Debug("Setting JDK version: %s", version)
 
 	versionPath := filepath.Join(s.installDir, "java", version)
@@ -153,11 +207,26 @@ func (s *Service) List() ([]string, error) {
 	return versions, nil
 }
 
-func (s *Service) fetchPackages(javaVersion string, platform platform.Info) ([]AzulPackage, error) {
-	apiURL := fmt.Sprintf(
-		"https://api.azul.com/metadata/v1/zulu/packages/?java_version=%s&arch=%s&os=%s&archive_type=zip&java_package_type=jdk",
-		javaVersion, platform.MapArchitecture(), platform.OS,
-	)
+func (s *Service) fetchPackages(javaVersion string, target platform.Info) ([]AzulPackage, error) {
+	osName, arch, err := target.AzulTarget()
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := url.Parse(s.apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Azul metadata URL: %w", err)
+	}
+	query := endpoint.Query()
+	query.Set("java_version", javaVersion)
+	query.Set("arch", arch)
+	query.Set("os", osName)
+	query.Set("archive_type", "zip")
+	query.Set("java_package_type", "jdk")
+	query.Set("availability_types", "CA")
+	query.Set("release_status", "ga")
+	query.Set("javafx_bundled", "false")
+	endpoint.RawQuery = query.Encode()
+	apiURL := endpoint.String()
 
 	s.logger.Debug("Fetching JDK packages from: %s", apiURL)
 
@@ -199,9 +268,23 @@ func (s *Service) downloadAndInstall(pkg AzulPackage, finalPath string) error {
 		return err
 	}
 
-	// Extract
-	if err := s.extractor.Extract(zipPath, extractDir); err != nil {
-		return err
+	// Azul responds with a direct package URL. Extract the actual archive type
+	// instead of assuming the Windows ZIP convention on every host.
+	archiveName := strings.ToLower(pkg.Name)
+	if archiveName == "" {
+		archiveName = strings.ToLower(pkg.DownloadURL)
+	}
+	switch {
+	case strings.HasSuffix(archiveName, ".zip"):
+		if err := s.extractor.Extract(zipPath, extractDir); err != nil {
+			return err
+		}
+	case strings.HasSuffix(archiveName, ".tar.gz"), strings.HasSuffix(archiveName, ".tgz"):
+		if err := s.tarGz.Extract(zipPath, extractDir); err != nil {
+			return err
+		}
+	default:
+		return errors.NewExtractionError("unsupported Zulu JDK archive format", nil)
 	}
 
 	// Find extracted root directory
@@ -235,6 +318,9 @@ func (s *Service) createVersionString(javaVersion []int) string {
 }
 
 func (s *Service) GetCurrentJDKVersion() (string, error) {
+	if symlinkPath := strings.TrimSpace(os.Getenv("AEM_JAVA_SYMLINK")); symlinkPath != "" {
+		return state.New(state.NewOSReader(), "").CurrentVersionAt(symlinkPath, "java")
+	}
 	state, err := s.fs.GetState()
 	if err != nil {
 		return "", err
@@ -243,6 +329,10 @@ func (s *Service) GetCurrentJDKVersion() (string, error) {
 }
 
 func (s *Service) Uninstall(majorVersion string) error {
+	majorVersion = normalizeRequestedVersion(majorVersion)
+	if majorVersion == "" {
+		return errors.NewValidationError("JDK version is required")
+	}
 	s.logger.Debug("Un-installing JDK version: %s", majorVersion)
 
 	// Check if the environment is being set
@@ -256,15 +346,10 @@ func (s *Service) Uninstall(majorVersion string) error {
 	}
 
 	// Check if already installed
-	versionPath := filepath.Join(s.installDir, "java", majorVersion)
+	versionPath := filepath.Join(s.installDir, "java", normalizeInstalledVersion(majorVersion))
 	if !s.fs.Exists(versionPath) {
-		vVersionPath := filepath.Join(s.installDir, "java", "v"+majorVersion)
-		if s.fs.Exists(vVersionPath) {
-			versionPath = vVersionPath
-		} else {
-			s.logger.Debug("JDK version %s not found", majorVersion)
-			return nil
-		}
+		s.logger.Debug("JDK version %s not found", majorVersion)
+		return nil
 	}
 
 	// Remove version
@@ -275,4 +360,16 @@ func (s *Service) Uninstall(majorVersion string) error {
 
 	s.logger.Debug("Successfully removed JDK version %s", majorVersion)
 	return nil
+}
+
+func normalizeRequestedVersion(version string) string {
+	return strings.TrimPrefix(strings.TrimSpace(version), "v")
+}
+
+func normalizeInstalledVersion(version string) string {
+	version = normalizeRequestedVersion(version)
+	if version == "" {
+		return "v"
+	}
+	return "v" + version
 }

@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: aem
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: aem
+    main: .
+    binary: aem
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X aem/cmd.Version={{ .Version }} -X aem/cmd.Commit={{ .Commit }} -X aem/cmd.BuildDate={{ .Date }}
+
+archives:
+  - id: default
+    ids:
+      - aem
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc

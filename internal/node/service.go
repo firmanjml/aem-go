@@ -7,7 +7,10 @@ import (
 	"aem/pkg/errors"
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
+	"aem/pkg/state"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,16 +26,26 @@ type Service struct {
 	zipper     *archiver.ZipExtractor
 	tarGz      *archiver.TarGzExtractor
 	installDir string
+	distURL    string
+	platform   platform.Info
 }
 
 func NewService(logger *logger.Logger, installDir string) *Service {
+	return newService(logger, installDir, "https://nodejs.org/dist", platform.GetInfo())
+}
+
+// newService permits package-level integration tests to supply a local
+// distribution server and an explicit target without changing production API.
+func newService(log *logger.Logger, installDir, distURL string, target platform.Info) *Service {
 	return &Service{
-		logger:     logger,
-		downloader: downloader.New(logger),
-		fs:         filesystem.New(logger),
-		zipper:     archiver.NewZipExtractor(logger),
-		tarGz:      archiver.NewTarGzExtractor(logger),
+		logger:     log,
+		downloader: downloader.New(log),
+		fs:         filesystem.New(log),
+		zipper:     archiver.NewZipExtractor(log),
+		tarGz:      archiver.NewTarGzExtractor(log),
 		installDir: installDir,
+		distURL:    strings.TrimSuffix(distURL, "/"),
+		platform:   target,
 	}
 }
 
@@ -159,7 +172,7 @@ func (s *Service) List() ([]string, error) {
 func (s *Service) GetVersions() ([]string, error) {
 	s.logger.Debug("Fetching Node.js versions")
 
-	resp, err := s.downloader.GetHTML("https://nodejs.org/dist/")
+	resp, err := s.downloader.GetHTML(s.distURL + "/")
 	if err != nil {
 		return nil, errors.NewAPIError("failed to fetch Node.js versions", err)
 	}
@@ -198,17 +211,19 @@ func (s *Service) GetVersions() ([]string, error) {
 }
 
 func (s *Service) getDownloadURL(version string) (string, error) {
-	platform := platform.GetInfo()
-	target := platform.GetNodeTarget()
+	target, err := s.platform.NodeTarget()
+	if err != nil {
+		return "", err
+	}
 	archiveSuffix := ".tar.gz"
-	if platform.OS == "windows" {
+	if s.platform.OS == "windows" {
 		archiveSuffix = ".zip"
 	}
 
-	url := "https://nodejs.org/dist/" + version
-	s.logger.Debug("Searching for Node.js binary at: %s", url)
+	pageURL := s.distURL + "/" + version
+	s.logger.Debug("Searching for Node.js binary at: %s", pageURL)
 
-	resp, err := s.downloader.GetHTML(url)
+	resp, err := s.downloader.GetHTML(pageURL)
 	if err != nil {
 		return "", errors.NewAPIError("failed to fetch Node.js download page", err)
 	}
@@ -227,7 +242,7 @@ func (s *Service) getDownloadURL(version string) (string, error) {
 				if attr.Key == "href" &&
 					strings.Contains(attr.Val, target) &&
 					strings.HasSuffix(attr.Val, archiveSuffix) {
-					downloadURL = "https://nodejs.org" + attr.Val
+					downloadURL = resolveDownloadURL(pageURL, attr.Val)
 					return
 				}
 			}
@@ -243,6 +258,18 @@ func (s *Service) getDownloadURL(version string) (string, error) {
 	}
 
 	return downloadURL, nil
+}
+
+func resolveDownloadURL(pageURL, reference string) string {
+	page, err := url.Parse(pageURL + "/")
+	if err != nil {
+		return reference
+	}
+	ref, err := url.Parse(reference)
+	if err != nil {
+		return reference
+	}
+	return page.ResolveReference(ref).String()
 }
 
 func (s *Service) downloadAndInstall(url, version string) error {
@@ -308,6 +335,9 @@ func (s *Service) downloadAndInstall(url, version string) error {
 }
 
 func (s *Service) GetCurrentNodeVersion() (string, error) {
+	if symlinkPath := strings.TrimSpace(os.Getenv("AEM_NODE_SYMLINK")); symlinkPath != "" {
+		return state.New(state.NewOSReader(), "").CurrentVersionAt(symlinkPath, "node")
+	}
 	state, err := s.fs.GetState()
 	if err != nil {
 		return "", err

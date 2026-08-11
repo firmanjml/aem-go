@@ -5,7 +5,9 @@ import (
 	"aem/pkg/logger"
 	"aem/pkg/state"
 	"aem/pkg/version"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -65,11 +67,18 @@ func (fs *FileSystem) CreateSymlink(link, target string) error {
 		return errors.NewFileSystemError("failed to create symlink parent directory", err)
 	}
 
-	// Remove existing symlink if it exists
-	if _, err := os.Lstat(link); err == nil {
+	// Replace an existing link, but never remove a regular file or directory at
+	// the configured link path. A custom AEM_*_SYMLINK path may point anywhere
+	// on disk, so treating every existing path as replaceable would be unsafe.
+	if info, err := os.Lstat(link); err == nil {
+		if info.Mode()&os.ModeSymlink == 0 {
+			return errors.NewFileSystemError("refusing to replace non-symlink path", nil)
+		}
 		if err := os.Remove(link); err != nil {
 			return errors.NewFileSystemError("failed to remove existing symlink", err)
 		}
+	} else if !os.IsNotExist(err) {
+		return errors.NewFileSystemError("failed to inspect existing symlink path", err)
 	}
 
 	// Get absolute path for target
@@ -81,11 +90,26 @@ func (fs *FileSystem) CreateSymlink(link, target string) error {
 	// Create symlink
 	if err := os.Symlink(absTarget, link); err != nil {
 		if runtime.GOOS == "windows" {
-			return errors.NewFileSystemError("failed to create symlink (may need administrator privileges on Windows)", err)
+			// Directory junctions do not require Developer Mode or an elevated
+			// shell. They provide the same activation semantics for AEM's managed
+			// runtime directories when Windows refuses a symbolic link.
+			if junctionErr := createWindowsJunction(link, absTarget); junctionErr == nil {
+				return nil
+			} else {
+				return errors.NewFileSystemError("failed to create symlink or directory junction on Windows", fmt.Errorf("symlink: %w; junction: %v", err, junctionErr))
+			}
 		}
 		return errors.NewFileSystemError("failed to create symlink", err)
 	}
 
+	return nil
+}
+
+func createWindowsJunction(link, target string) error {
+	command := exec.Command("cmd", "/C", "mklink", "/J", link, target)
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("mklink /J failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
 	return nil
 }
 

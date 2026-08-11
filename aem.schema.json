@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/firmanjml/aem-go/main/aem.schema.json",
+  "title": "Adaptive Environment Manager project configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "format": "uri-reference" },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "node": { "type": "string", "minLength": 1 },
+        "java": { "type": "string", "minLength": 1 }
+      }
+    },
+    "android": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platforms": { "$ref": "#/$defs/stringList" },
+        "buildTools": { "$ref": "#/$defs/stringList" },
+        "ndk": { "$ref": "#/$defs/stringList" },
+        "cmake": { "$ref": "#/$defs/stringList" },
+        "systemImages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["apiLevel", "variant", "architecture"],
+            "properties": {
+              "apiLevel": { "type": "integer", "minimum": 1 },
+              "variant": { "type": "string", "minLength": 1 },
+              "architecture": { "type": "string", "minLength": 1 },
+              "package": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preSetup": { "$ref": "#/$defs/stringList" },
+        "postSetup": { "$ref": "#/$defs/stringList" }
+      }
+    }
+  },
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

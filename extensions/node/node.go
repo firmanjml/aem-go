@@ -2,6 +2,7 @@ package node
 
 import (
 	"aem/internal/manager"
+	"aem/internal/platform"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 type NodeExtension struct {
 	manager.BaseExtension
+	platform platform.Info
 }
 
 type NodeJSRelease struct {
@@ -20,78 +22,46 @@ type NodeJSRelease struct {
 }
 
 func NewNodeExtension() *NodeExtension {
+	return newNodeExtension("https://nodejs.org/dist", platform.GetInfo())
+}
+
+func newNodeExtension(baseURL string, target platform.Info) *NodeExtension {
 	return &NodeExtension{
-		BaseExtension: manager.BaseExtension{BaseUrl: "https://www.nodejs.org/dist"},
+		BaseExtension: manager.BaseExtension{BaseUrl: baseURL},
+		platform:      target,
 	}
 }
 
 func (n *NodeExtension) CheckVersion(version string) (bool, error) {
-	// Ensure version starts with 'v'
-	if !strings.HasPrefix(version, "v") {
-		version = "v" + version
-	}
-
-	jsonURL := strings.TrimSuffix(n.BaseUrl, "/") + "/index.json"
-	resp, err := http.Get(jsonURL)
-
+	version = normalizeVersion(version)
+	releases, err := n.fetchReleases()
 	if err != nil {
 		return false, err
 	}
-
-	if resp.StatusCode == 200 {
-		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return false, fmt.Errorf("failed to read JSON response: %w", err)
-		}
-
-		var releases []NodeJSRelease
-		if err := json.Unmarshal(body, &releases); err != nil {
-			return false, fmt.Errorf("failed to parse JSON: %w", err)
-		}
-
-		for _, release := range releases {
-			if release.Version == version {
-				return true, nil
-			}
+	for _, release := range releases {
+		if release.Version == version {
+			return n.supportsTarget(release), nil
 		}
 	}
-
 	return false, nil
 }
 
 func (n *NodeExtension) ListVersions(version *string) ([]string, error) {
 	if version != nil {
-		if !strings.HasPrefix(*version, "v") {
-			v := "v" + *version
-			version = &v
-		}
+		v := normalizeVersion(*version)
+		version = &v
 	}
 
-	jsonURL := strings.TrimSuffix(n.BaseUrl, "/") + "/index.json"
-	resp, err := http.Get(jsonURL)
+	releases, err := n.fetchReleases()
 	if err != nil {
-		return []string{}, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return []string{}, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return nil, err
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return []string{}, fmt.Errorf("failed to read JSON response: %w", err)
-	}
-
-	var releases []NodeJSRelease
-	if err := json.Unmarshal(body, &releases); err != nil {
-		return []string{}, fmt.Errorf("failed to parse JSON: %w", err)
-	}
-
-	var versions []string
+	versions := make([]string, 0, 10)
 	for _, release := range releases {
-
+		if !n.supportsTarget(release) {
+			continue
+		}
 		if version == nil || strings.HasPrefix(release.Version, *version) {
 			versions = append(versions, strings.TrimPrefix(release.Version, "v"))
 		}
@@ -99,43 +69,83 @@ func (n *NodeExtension) ListVersions(version *string) ([]string, error) {
 			break
 		}
 	}
-
 	return versions, nil
 }
 
 func (n *NodeExtension) GetDownloadURL(version string) (string, error) {
-
-	if !strings.HasPrefix(version, "v") {
-		version = "v" + version
-	}
-
-	exists, err := n.CheckVersion(version)
+	version = normalizeVersion(version)
+	target, err := n.platform.NodeTarget()
 	if err != nil {
-		return "", fmt.Errorf("failed to check version: %w", err)
+		return "", err
 	}
-	if !exists {
-		return "", fmt.Errorf("version %s not found", version)
+	metadataKey, err := n.platform.NodeMetadataKey()
+	if err != nil {
+		return "", err
 	}
+	releases, err := n.fetchReleases()
+	if err != nil {
+		return "", err
+	}
+	for _, release := range releases {
+		if release.Version != version {
+			continue
+		}
+		if !contains(release.Files, metadataKey) {
+			return "", fmt.Errorf("Node.js version %s has no binary for %s", version, target)
+		}
+		extension := ".tar.gz"
+		if n.platform.OS == "windows" {
+			extension = ".zip"
+		}
+		return fmt.Sprintf("%s/%s/node-%s-%s%s", strings.TrimSuffix(n.BaseUrl, "/"), version, version, target, extension), nil
+	}
+	return "", fmt.Errorf("Node.js version %s not found", version)
+}
 
-	jsonURL := strings.TrimSuffix(n.BaseUrl, "/")
-	resp, err := http.Get(jsonURL)
-	if err == nil && resp.StatusCode == 200 {
-		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
-		if err == nil {
-			var releases []NodeJSRelease
-			if json.Unmarshal(body, &releases) == nil {
-				for _, release := range releases {
-					if release.Version == version {
-						// Check if target file exists in the files list
-						v := release.Version
-						a := "x64"
-						return n.BaseUrl + "/" + v + "/node-" + v + "-win-" + a + ".zip", nil
-					}
-				}
-			}
+func (n *NodeExtension) fetchReleases() ([]NodeJSRelease, error) {
+	jsonURL := strings.TrimSuffix(n.BaseUrl, "/") + "/index.json"
+	resp, err := http.Get(jsonURL) // #nosec G107 -- provider endpoint is configured by the extension.
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read JSON response: %w", err)
+	}
+	var releases []NodeJSRelease
+	if err := json.Unmarshal(body, &releases); err != nil {
+		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	}
+	return releases, nil
+}
+
+func (n *NodeExtension) supportsTarget(release NodeJSRelease) bool {
+	target, err := n.platform.NodeMetadataKey()
+	if err != nil {
+		return false
+	}
+	// Node's old index records did not include files. Keep historical versions
+	// discoverable; GetDownloadURL remains the definitive availability check.
+	return len(release.Files) == 0 || contains(release.Files, target)
+}
+
+func normalizeVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if !strings.HasPrefix(version, "v") {
+		return "v" + version
+	}
+	return version
+}
+
+func contains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
 		}
 	}
-
-	return "", fmt.Errorf("not found for version %s", version)
+	return false
 }

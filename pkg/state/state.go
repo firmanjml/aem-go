@@ -23,27 +23,16 @@ func New(reader LinkReader, currentRoot string) *State {
 }
 
 func (s *State) CurrentNodeVersion() (string, error) {
-	return s.currentVersion("node")
+	return s.CurrentVersionAt(filepath.Join(s.currentRoot, "node"), "node")
 }
 
 func (s *State) CurrentJavaVersion() (string, error) {
-	return s.currentVersion("java")
+	return s.CurrentVersionAt(filepath.Join(s.currentRoot, "java"), "java")
 }
 
-func (s *State) CurrentAndroidPath() (string, error) {
-	linkPath := filepath.Join(s.currentRoot, "android")
-	target, err := s.reader.Readlink(linkPath)
-	if err != nil {
-		if isNotExist(err) {
-			return "", nil
-		}
-		return "", errors.NewFileSystemError("failed to read android symlink", err)
-	}
-	return filepath.Clean(target), nil
-}
-
-func (s *State) currentVersion(module string) (string, error) {
-	linkPath := filepath.Join(s.currentRoot, module)
+// CurrentVersionAt returns the version selected by a runtime link, including
+// links configured outside AEM_HOME through AEM_NODE_SYMLINK or AEM_JAVA_SYMLINK.
+func (s *State) CurrentVersionAt(linkPath, module string) (string, error) {
 	target, err := s.reader.Readlink(linkPath)
 	if err != nil {
 		if isNotExist(err) {
@@ -56,4 +45,3 @@ func (s *State) currentVersion(module string) (string, error) {
 	version = strings.TrimPrefix(version, "v")
 	return version, nil
 }
-

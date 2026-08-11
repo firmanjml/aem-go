@@ -6,17 +6,20 @@ import (
 	"aem/internal/java"
 	"aem/internal/node"
 	"aem/pkg/logger"
+	"aem/pkg/process"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
 
 type Service struct {
-	logger *logger.Logger
-	node   *node.Service
-	java   *java.Service
+	logger  *logger.Logger
+	node    *node.Service
+	java    *java.Service
 	android *android.Service
 }
 
@@ -42,6 +45,14 @@ func (s *Service) Setup() error {
 	if err != nil {
 		return err
 	}
+	for _, warning := range projectConfig.MigrationWarnings() {
+		s.logger.Info("Configuration migration: %s", warning)
+	}
+
+	projectDir := filepath.Dir(configPath)
+	if err := runHooks(projectConfig.Hooks.PreSetup, projectDir, "preSetup"); err != nil {
+		return err
+	}
 
 	javaHome, err := s.setupCoreRuntimes(projectConfig)
 	if err != nil {
@@ -49,6 +60,9 @@ func (s *Service) Setup() error {
 	}
 
 	if err := s.setupAndroid(projectConfig.Android, javaHome); err != nil {
+		return err
+	}
+	if err := runHooks(projectConfig.Hooks.PostSetup, projectDir, "postSetup"); err != nil {
 		return err
 	}
 
@@ -63,17 +77,17 @@ func (s *Service) setupCoreRuntimes(projectConfig *config.ProjectConfig) (string
 	javaErrCh := make(chan error, 1)
 	javaHomeCh := make(chan string, 1)
 
-	if projectConfig.Node != "" {
+	if projectConfig.Runtime.Node != "" {
 		wg.Add(1)
 		go func(version string) {
 			defer wg.Done()
 			nodeErrCh <- s.setupNode(version)
-		}(projectConfig.Node)
+		}(projectConfig.Runtime.Node)
 	} else {
 		s.logger.Debug("No Node.js version specified in config")
 	}
 
-	if projectConfig.JDK != "" {
+	if projectConfig.Runtime.Java != "" {
 		wg.Add(1)
 		go func(version string) {
 			defer wg.Done()
@@ -84,7 +98,7 @@ func (s *Service) setupCoreRuntimes(projectConfig *config.ProjectConfig) (string
 			}
 			javaHomeCh <- javaHome
 			javaErrCh <- nil
-		}(projectConfig.JDK)
+		}(projectConfig.Runtime.Java)
 	} else {
 		s.logger.Debug("No JDK version specified in config")
 	}
@@ -164,11 +178,39 @@ func (s *Service) setupJava(version string) (string, error) {
 		return "", fmt.Errorf("failed to set JDK version: %w", err)
 	}
 
-	return filepath.Clean(symlinkPath), nil
+	javaHome, err := resolveJavaHome(symlinkPath)
+	if err != nil {
+		return "", err
+	}
+	return javaHome, nil
+}
+
+// resolveJavaHome finds the directory expected by Java tooling. macOS JDK
+// bundles place it below Contents/Home, while Linux and Windows JDK archives
+// normally expose bin directly from the installation root.
+func resolveJavaHome(runtimePath string) (string, error) {
+	runtimePath = filepath.Clean(runtimePath)
+	candidates := []string{
+		filepath.Join(runtimePath, "Contents", "Home"),
+		runtimePath,
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(filepath.Join(candidate, "bin", javaExecutableName())); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("active JDK at %s does not contain %s", runtimePath, filepath.Join("bin", javaExecutableName()))
+}
+
+func javaExecutableName() string {
+	if runtime.GOOS == "windows" {
+		return "java.exe"
+	}
+	return "java"
 }
 
 func (s *Service) setupAndroid(cfg config.AndroidConfig, javaHome string) error {
-	if len(cfg.SDK) == 0 && len(cfg.NDK) == 0 && len(cfg.BuildTool) == 0 {
+	if len(cfg.Platforms) == 0 && len(cfg.NDK) == 0 && len(cfg.BuildTools) == 0 && len(cfg.CMake) == 0 && len(cfg.SystemImages) == 0 {
 		s.logger.Debug("No Android SDK configuration specified in config")
 		return nil
 	}
@@ -176,15 +218,6 @@ func (s *Service) setupAndroid(cfg config.AndroidConfig, javaHome string) error 
 	s.logger.Debug("Setting up Android SDK packages")
 	if err := s.android.Setup(cfg, javaHome); err != nil {
 		return err
-	}
-
-	symlinkPath, err := resolveSymlinkPath("AEM_ANDROID_SYMLINK", "current", "android")
-	if err != nil {
-		return err
-	}
-
-	if err := s.android.Use(symlinkPath); err != nil {
-		return fmt.Errorf("failed to set Android SDK path: %w", err)
 	}
 
 	return nil
@@ -209,4 +242,25 @@ func resolveSymlinkPath(envName string, defaults ...string) (string, error) {
 
 var getEnv = func(key string) string {
 	return os.Getenv(key)
+}
+
+func runHooks(hooks config.StringList, dir, phase string) error {
+	for _, hook := range hooks {
+		cmd := hookCommand(hook)
+		cmd.Dir = dir
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Stdin = os.Stdin
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("%s hook %q failed: %w", phase, hook, err)
+		}
+	}
+	return nil
+}
+
+func hookCommand(command string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		return exec.CommandContext(process.Context(), "cmd", "/C", command)
+	}
+	return exec.CommandContext(process.Context(), "sh", "-c", command)
 }

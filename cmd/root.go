@@ -4,10 +4,11 @@ import (
 	"aem/assets"
 	javaext "aem/extensions/java"
 	nodeext "aem/extensions/node"
+	androidsvc "aem/internal/android"
 	javasvc "aem/internal/java"
+	"aem/internal/manager"
 	nodesvc "aem/internal/node"
 	"aem/internal/setup"
-	"aem/internal/manager"
 	"aem/pkg/filesystem"
 	"aem/pkg/logger"
 	"aem/pkg/process"
@@ -49,9 +50,9 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-var listCmd = &cobra.Command{
-	Use:   "list",
-	Short: "list all module versions",
+var availableCmd = &cobra.Command{
+	Use:   "available [module] [version-prefix]",
+	Short: "List remotely available versions",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		module := args[0]
@@ -85,6 +86,45 @@ var listCmd = &cobra.Command{
 			}
 		}
 
+		return nil
+	},
+}
+
+var listCmd = &cobra.Command{
+	Use:   "list [module]",
+	Short: "List installed runtime versions or Android components",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		installDir, err := fs.GetInstallDir()
+		if err != nil {
+			return err
+		}
+
+		var versions []string
+		switch args[0] {
+		case "node":
+			versions, err = nodesvc.NewService(log, installDir).List()
+		case "java":
+			versions, err = javasvc.NewService(log, installDir).List()
+		case "android":
+			versions, err = androidsvc.NewService(log, installDir).List()
+		default:
+			return fmt.Errorf("%s module does not exist", args[0])
+		}
+		if err != nil {
+			return err
+		}
+		if len(versions) == 0 {
+			if args[0] == "android" {
+				fmt.Println("No Android components installed")
+				return nil
+			}
+			fmt.Printf("No %s versions installed\n", args[0])
+			return nil
+		}
+		for _, version := range versions {
+			fmt.Println(version)
+		}
 		return nil
 	},
 }
@@ -168,6 +208,32 @@ var useCmd = &cobra.Command{
 	},
 }
 
+var uninstallCmd = &cobra.Command{
+	Use:   "uninstall [module] [version]",
+	Short: "Remove an installed runtime that is not active",
+	Args:  cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		installDir, err := fs.GetInstallDir()
+		if err != nil {
+			return err
+		}
+
+		switch args[0] {
+		case "node":
+			err = nodesvc.NewService(log, installDir).Uninstall(args[1])
+		case "java":
+			err = javasvc.NewService(log, installDir).Uninstall(args[1])
+		default:
+			return fmt.Errorf("%s module does not exist", args[0])
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Uninstalled %s %s\n", args[0], strings.TrimPrefix(args[1], "v"))
+		return nil
+	},
+}
+
 var currentCmd = &cobra.Command{
 	Use:   "current",
 	Short: "Show the current active runtimes",
@@ -187,18 +253,8 @@ var currentCmd = &cobra.Command{
 			return err
 		}
 
-		androidPath, err := st.CurrentAndroidPath()
-		if err != nil {
-			return err
-		}
-
 		printCurrent("node", nodeVersion)
 		printCurrent("java", javaVersion)
-		if androidPath == "" {
-			fmt.Println("android: none")
-		} else {
-			fmt.Printf("android: %s\n", androidPath)
-		}
 
 		return nil
 	},
@@ -233,11 +289,6 @@ var doctorCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		androidPath, err := st.CurrentAndroidPath()
-		if err != nil {
-			return err
-		}
-
 		fmt.Printf("AEM home: %s\n", aemHome)
 		fmt.Printf("Install dir: %s\n", installDir)
 		fmt.Printf("Current links: %s\n", currentRoot)
@@ -245,10 +296,15 @@ var doctorCmd = &cobra.Command{
 		fmt.Printf("Java installed: %d\n", countInstalledDirs(filepath.Join(installDir, "java")))
 		printDoctorRuntime("node", nodeVersion, filepath.Join(currentRoot, "node"))
 		printDoctorRuntime("java", javaVersion, filepath.Join(currentRoot, "java"))
-		if androidPath == "" {
-			fmt.Printf("android current: missing (%s)\n", filepath.Join(currentRoot, "android"))
-		} else {
-			fmt.Printf("android current: %s\n", androidPath)
+		androidService := androidsvc.NewService(log, installDir)
+		components, err := androidService.List()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Android SDK: %s\n", androidService.SDKRoot())
+		fmt.Printf("Android components installed: %d\n", len(components))
+		for _, component := range components {
+			fmt.Printf("  %s\n", component)
 		}
 		if legacyVersionsExists(aemHome) {
 			fmt.Printf("versions.json: present (%s)\n", filepath.Join(aemHome, "versions.json"))
@@ -272,10 +328,14 @@ func Execute() {
 
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "enable verbose mode")
 
+	rootCmd.AddCommand(newInitCmd())
+	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newSetupCmd())
+	rootCmd.AddCommand(availableCmd)
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(useCmd)
+	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(currentCmd)
 	rootCmd.AddCommand(doctorCmd)
 

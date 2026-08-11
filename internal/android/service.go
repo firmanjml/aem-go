@@ -25,6 +25,7 @@ type Service struct {
 	fs         *filesystem.FileSystem
 	zipper     *archiver.ZipExtractor
 	installDir string
+	runCommand func(sdkRoot, javaHome string, args ...string) ([]byte, error)
 }
 
 type repositoryXML struct {
@@ -73,13 +74,15 @@ type baseRevision struct {
 }
 
 func NewService(logger *logger.Logger, installDir string) *Service {
-	return &Service{
+	s := &Service{
 		logger:     logger,
 		downloader: downloader.New(logger),
 		fs:         filesystem.New(logger),
 		zipper:     archiver.NewZipExtractor(logger),
 		installDir: installDir,
 	}
+	s.runCommand = s.runSDKManagerCommand
+	return s
 }
 
 func (s *Service) Setup(cfg config.AndroidConfig, javaHome string) error {
@@ -89,7 +92,7 @@ func (s *Service) Setup(cfg config.AndroidConfig, javaHome string) error {
 		return nil
 	}
 
-	sdkRoot := s.sdkRoot()
+	sdkRoot := s.SDKRoot()
 	if err := s.fs.EnsureDir(sdkRoot); err != nil {
 		return err
 	}
@@ -98,11 +101,17 @@ func (s *Service) Setup(cfg config.AndroidConfig, javaHome string) error {
 		return err
 	}
 
+	missingPackages := s.missingPackages(sdkRoot, requestedPackages)
+	if len(missingPackages) == 0 {
+		s.logger.Debug("Requested Android SDK packages are already installed")
+		return nil
+	}
+
 	if err := s.acceptLicenses(sdkRoot, javaHome); err != nil {
 		return err
 	}
 
-	if err := s.installPackages(sdkRoot, javaHome, requestedPackages); err != nil {
+	if err := s.installPackages(sdkRoot, javaHome, missingPackages); err != nil {
 		return err
 	}
 
@@ -110,15 +119,162 @@ func (s *Service) Setup(cfg config.AndroidConfig, javaHome string) error {
 	return nil
 }
 
-func (s *Service) Use(symlinkPath string) error {
-	if symlinkPath == "" {
-		return errors.NewValidationError("android symlink path not configured")
-	}
-
-	return s.fs.CreateSymlink(symlinkPath, s.sdkRoot())
+// List returns package identifiers from the SDK selected through ANDROID_HOME
+// (or ANDROID_SDK_ROOT when ANDROID_HOME is not set).
+func (s *Service) List() ([]string, error) {
+	return s.ListAt(s.SDKRoot())
 }
 
-func (s *Service) sdkRoot() string {
+// ListAt returns Android SDK package identifiers found below sdkRoot. It only
+// inspects the local filesystem and never queries the Android repository.
+func (s *Service) ListAt(sdkRoot string) ([]string, error) {
+	if !s.fs.Exists(sdkRoot) {
+		return nil, nil
+	}
+
+	var packages []string
+	if s.fs.Exists(filepath.Join(sdkRoot, "cmdline-tools", "latest")) {
+		packages = append(packages, "cmdline-tools;latest")
+	}
+	if s.fs.Exists(filepath.Join(sdkRoot, "platform-tools")) {
+		packages = append(packages, "platform-tools")
+	}
+
+	for _, component := range []struct {
+		directory string
+		prefix    string
+	}{
+		{"platforms", "platforms;"},
+		{"build-tools", "build-tools;"},
+		{"ndk", "ndk;"},
+		{"cmake", "cmake;"},
+	} {
+		entries, err := os.ReadDir(filepath.Join(sdkRoot, component.directory))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("failed to list Android %s components: %w", component.directory, err)
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				packages = append(packages, component.prefix+entry.Name())
+			}
+		}
+	}
+
+	systemImagesRoot := filepath.Join(sdkRoot, "system-images")
+	apiLevels, err := os.ReadDir(systemImagesRoot)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to list Android system images: %w", err)
+	}
+	for _, apiLevel := range apiLevels {
+		if !apiLevel.IsDir() {
+			continue
+		}
+		variants, err := os.ReadDir(filepath.Join(systemImagesRoot, apiLevel.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("failed to list Android system image variants: %w", err)
+		}
+		for _, variant := range variants {
+			if !variant.IsDir() {
+				continue
+			}
+			architectures, err := os.ReadDir(filepath.Join(systemImagesRoot, apiLevel.Name(), variant.Name()))
+			if err != nil {
+				return nil, fmt.Errorf("failed to list Android system image architectures: %w", err)
+			}
+			for _, architecture := range architectures {
+				if architecture.IsDir() {
+					packages = append(packages, strings.Join([]string{"system-images", apiLevel.Name(), variant.Name(), architecture.Name()}, ";"))
+				}
+			}
+		}
+	}
+
+	metadataPackages, err := installedPackageMetadata(sdkRoot)
+	if err != nil {
+		return nil, err
+	}
+	packages = append(packages, metadataPackages...)
+	packages = uniqueStrings(packages)
+	sort.Strings(packages)
+	return packages, nil
+}
+
+// installedPackageMetadata finds packages which may not have a predictable SDK
+// directory layout (for example emulator, sources, and extras). Android writes
+// a package.xml manifest containing the canonical sdkmanager package ID for
+// every installed package.
+func installedPackageMetadata(sdkRoot string) ([]string, error) {
+	var packages []string
+	if err := scanPackageMetadata(sdkRoot, 4, &packages); err != nil {
+		return nil, fmt.Errorf("failed to inspect Android SDK packages: %w", err)
+	}
+	return packages, nil
+}
+
+// scanPackageMetadata descends only through SDK package directories. It does
+// not walk package contents (which can include multi-gigabyte system images).
+// Android's deepest standard package layout is system-images;api;tag;abi.
+func scanPackageMetadata(dir string, depthRemaining int, packages *[]string) error {
+	manifestPath := filepath.Join(dir, "package.xml")
+	data, err := os.ReadFile(manifestPath)
+	if err == nil {
+		var manifest struct {
+			Path string `xml:"path,attr"`
+		}
+		if err := xml.Unmarshal(data, &manifest); err != nil {
+			return fmt.Errorf("failed to read Android package metadata %s: %w", manifestPath, err)
+		}
+		if manifest.Path != "" {
+			*packages = append(*packages, manifest.Path)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	if depthRemaining == 0 {
+		return nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			if err := scanPackageMetadata(filepath.Join(dir, entry.Name()), depthRemaining-1, packages); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, exists := seen[value]; !exists {
+			seen[value] = struct{}{}
+			unique = append(unique, value)
+		}
+	}
+	return unique
+}
+
+// SDKRoot returns the Android SDK configured for the current shell. The
+// managed-directory fallback preserves compatibility for installations created
+// before Android SDK discovery was configured by the installer.
+func (s *Service) SDKRoot() string {
+	if androidHome := strings.TrimSpace(os.Getenv("ANDROID_HOME")); androidHome != "" {
+		return filepath.Clean(androidHome)
+	}
+	if androidSDKRoot := strings.TrimSpace(os.Getenv("ANDROID_SDK_ROOT")); androidSDKRoot != "" {
+		return filepath.Clean(androidSDKRoot)
+	}
 	return filepath.Join(s.installDir, "android", "sdk")
 }
 
@@ -225,11 +381,7 @@ func (s *Service) resolveCommandLineToolsURL() (string, error) {
 }
 
 func (s *Service) acceptLicenses(sdkRoot, javaHome string) error {
-	cmd := s.newSDKManagerCommand(sdkRoot, "--sdk_root="+sdkRoot, "--licenses")
-	cmd.Env = s.commandEnv(sdkRoot, javaHome)
-	cmd.Stdin = strings.NewReader(strings.Repeat("y\n", 32))
-
-	output, err := cmd.CombinedOutput()
+	output, err := s.runCommand(sdkRoot, javaHome, "--sdk_root="+sdkRoot, "--licenses")
 	if err != nil {
 		return fmt.Errorf("failed to accept Android SDK licenses: %w: %s", err, strings.TrimSpace(string(output)))
 	}
@@ -241,15 +393,32 @@ func (s *Service) installPackages(sdkRoot, javaHome string, packages []string) e
 	args := []string{"--sdk_root=" + sdkRoot}
 	args = append(args, packages...)
 
-	cmd := s.newSDKManagerCommand(sdkRoot, args...)
-	cmd.Env = s.commandEnv(sdkRoot, javaHome)
-
-	output, err := cmd.CombinedOutput()
+	output, err := s.runCommand(sdkRoot, javaHome, args...)
 	if err != nil {
 		return fmt.Errorf("failed to install Android SDK packages: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	return nil
+}
+
+func (s *Service) runSDKManagerCommand(sdkRoot, javaHome string, args ...string) ([]byte, error) {
+	cmd := s.newSDKManagerCommand(sdkRoot, args...)
+	cmd.Env = s.commandEnv(sdkRoot, javaHome)
+	if len(args) > 1 && args[1] == "--licenses" {
+		cmd.Stdin = strings.NewReader(strings.Repeat("y\n", 32))
+	}
+	return cmd.CombinedOutput()
+}
+
+func (s *Service) missingPackages(sdkRoot string, packages []string) []string {
+	var missing []string
+	for _, pkg := range packages {
+		path, known := androidPackagePath(sdkRoot, pkg)
+		if !known || !s.fs.Exists(path) {
+			missing = append(missing, pkg)
+		}
+	}
+	return missing
 }
 
 func (s *Service) sdkManagerPath(sdkRoot string) string {
@@ -283,7 +452,7 @@ func requestedAndroidPackages(cfg config.AndroidConfig) []string {
 	seen := make(map[string]struct{})
 	var packages []string
 
-	for _, value := range cfg.SDK {
+	for _, value := range cfg.Platforms {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
@@ -295,7 +464,7 @@ func requestedAndroidPackages(cfg config.AndroidConfig) []string {
 		packages = appendUnique(packages, seen, "platforms;android-"+value)
 	}
 
-	for _, value := range cfg.BuildTool {
+	for _, value := range cfg.BuildTools {
 		value = strings.TrimSpace(value)
 		if value == "" {
 			continue
@@ -319,8 +488,57 @@ func requestedAndroidPackages(cfg config.AndroidConfig) []string {
 		packages = appendUnique(packages, seen, "ndk;"+value)
 	}
 
+	for _, value := range cfg.CMake {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if strings.Contains(value, ";") {
+			packages = appendUnique(packages, seen, value)
+			continue
+		}
+		packages = appendUnique(packages, seen, "cmake;"+value)
+	}
+
+	for _, image := range cfg.SystemImages {
+		if image.Package != "" {
+			packages = appendUnique(packages, seen, image.Package)
+			continue
+		}
+		packages = appendUnique(packages, seen, fmt.Sprintf("system-images;android-%d;%s;%s", image.APILevel, image.Variant, image.Architecture))
+	}
+
 	packages = appendUnique(packages, seen, "platform-tools")
 	return packages
+}
+
+// androidPackagePath maps a package identifier to its expected local SDK
+// location. Unknown package formats remain installable, but cannot be treated
+// as present based on an unrelated filesystem path.
+func androidPackagePath(sdkRoot, pkg string) (string, bool) {
+	parts := strings.Split(pkg, ";")
+	validParts := func(count int) bool {
+		if len(parts) != count {
+			return false
+		}
+		for _, part := range parts {
+			if part == "" || part == "." || part == ".." || strings.ContainsAny(part, "/\\") {
+				return false
+			}
+		}
+		return true
+	}
+
+	switch {
+	case pkg == "platform-tools":
+		return filepath.Join(sdkRoot, "platform-tools"), true
+	case validParts(2) && (parts[0] == "platforms" || parts[0] == "build-tools" || parts[0] == "ndk" || parts[0] == "cmake"):
+		return filepath.Join(sdkRoot, parts[0], parts[1]), true
+	case validParts(4) && parts[0] == "system-images":
+		return filepath.Join(sdkRoot, parts[0], parts[1], parts[2], parts[3]), true
+	default:
+		return "", false
+	}
 }
 
 func appendUnique(values []string, seen map[string]struct{}, value string) []string {
