@@ -156,6 +156,8 @@ aem_prepend_path() {
 aem_prepend_path "\$AEM_HOME/bin"
 aem_prepend_path "\$AEM_HOME/current/node/bin"
 
+# AEM normalizes macOS JDK archives so their Java home is always available at
+# Contents/Home, including wrapped Zulu 8 bundles.
 aem_java_home="\$AEM_HOME/current/java"
 if [ "\$(uname -s)" = "Darwin" ]; then
   aem_java_home="\$aem_java_home/Contents/Home"

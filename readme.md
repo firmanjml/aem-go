@@ -893,10 +893,11 @@ ANDROID_SDK_ROOT=<your existing Android SDK>
 ```
 
 On macOS, Azul archives may be app bundles, so the managed script sets
-`JAVA_HOME` to `$AEM_HOME/current/java/Contents/Home`. The installer retains an
-existing Android SDK rather than moving it. For another shell, source the file
-from a POSIX-compatible startup wrapper, or source it manually before running
-tools that require Node or Java.
+`JAVA_HOME` to `$AEM_HOME/current/java/Contents/Home`. AEM normalizes wrapped
+Zulu 8 bundles to provide the same stable path used by newer JDKs. The installer
+retains an existing Android SDK rather than moving it. For another shell, source
+the file from a POSIX-compatible startup wrapper, or source it manually before
+running tools that require Node or Java.
 
 On Windows, `scripts/install.ps1` persists the same values for the current user
 and adds `%AEM_HOME%\bin`, `%AEM_HOME%\current\node`,

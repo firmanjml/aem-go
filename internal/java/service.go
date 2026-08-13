@@ -145,12 +145,58 @@ func (s *Service) Use(version string, symlinkPath string) error {
 		return errors.NewValidationError("symlink path not configured")
 	}
 
+	if err := s.ensureMacOSJavaHome(versionPath); err != nil {
+		return err
+	}
+
 	if err := s.fs.CreateSymlink(symlinkPath, versionPath); err != nil {
 		return err
 	}
 
 	s.logger.Debug("Successfully set JDK version: %s", version)
 	return nil
+}
+
+// ensureMacOSJavaHome normalizes Azul archives that wrap the JDK bundle in a
+// compatibility directory. Some Zulu 8 packages expose bin/java at the
+// archive root through symlinks while keeping the real home below
+// <name>.jdk/Contents/Home. AEM's shell integration uses Contents/Home as the
+// stable macOS JAVA_HOME, so make that path available before activating the
+// runtime.
+func (s *Service) ensureMacOSJavaHome(versionPath string) error {
+	if s.platform.OS != "darwin" {
+		return nil
+	}
+
+	javaHome := filepath.Join(versionPath, "Contents", "Home")
+	if isJavaHome(javaHome) {
+		return nil
+	}
+
+	entries, err := s.fs.ListDir(versionPath)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), ".jdk") {
+			continue
+		}
+		bundleHome := filepath.Join(versionPath, entry.Name(), "Contents", "Home")
+		if !isJavaHome(bundleHome) {
+			continue
+		}
+		if err := s.fs.CreateSymlink(javaHome, bundleHome); err != nil {
+			return fmt.Errorf("failed to normalize macOS JDK home: %w", err)
+		}
+		return nil
+	}
+
+	return errors.NewValidationError("installed macOS JDK does not contain Contents/Home")
+}
+
+func isJavaHome(path string) bool {
+	info, err := os.Stat(filepath.Join(path, "bin", "java"))
+	return err == nil && !info.IsDir()
 }
 
 func (s *Service) List() ([]string, error) {

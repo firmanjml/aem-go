@@ -1,6 +1,7 @@
 package java
 
 import (
+	"aem/internal/platform"
 	"aem/pkg/logger"
 	"os"
 	"path/filepath"
@@ -40,7 +41,12 @@ func TestUseAcceptsVersionWithOrWithoutVPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(root, "current", "java")
-	service := NewService(logger.New(false), installDir)
+	service := newService(
+		logger.New(false),
+		installDir,
+		"https://example.invalid/",
+		platform.Info{OS: "linux", Arch: "amd64"},
+	)
 
 	for _, version := range []string{"17.0.19", "v17.0.19"} {
 		if err := service.Use(version, link); err != nil {
@@ -53,6 +59,46 @@ func TestUseAcceptsVersionWithOrWithoutVPrefix(t *testing.T) {
 		if got != target {
 			t.Fatalf("Use(%q) target = %q, want %q", version, got, target)
 		}
+	}
+}
+
+func TestUseNormalizesWrappedMacOSJDKHome(t *testing.T) {
+	root := t.TempDir()
+	installDir := filepath.Join(root, "installs")
+	versionPath := filepath.Join(installDir, "java", "v8.0.452")
+	bundleHome := filepath.Join(versionPath, "zulu-8.jdk", "Contents", "Home")
+	javaPath := filepath.Join(bundleHome, "bin", "java")
+	if err := os.MkdirAll(filepath.Dir(javaPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(javaPath, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	link := filepath.Join(root, "current", "java")
+	service := newService(
+		logger.New(false),
+		installDir,
+		"https://example.invalid/",
+		platform.Info{OS: "darwin", Arch: "arm64"},
+	)
+	if err := service.Use("8.0.452", link); err != nil {
+		t.Fatalf("Use() error = %v", err)
+	}
+
+	normalizedHome := filepath.Join(versionPath, "Contents", "Home")
+	target, err := os.Readlink(normalizedHome)
+	if err != nil {
+		t.Fatalf("normalized macOS JDK home is not a symlink: %v", err)
+	}
+	if target != bundleHome {
+		t.Fatalf("normalized macOS JDK home target = %q, want %q", target, bundleHome)
+	}
+	if _, err := os.Stat(filepath.Join(link, "Contents", "Home", "bin", "java")); err != nil {
+		t.Fatalf("active JAVA_HOME does not contain bin/java: %v", err)
+	}
+	if err := service.Use("8.0.452", link); err != nil {
+		t.Fatalf("idempotent Use() error = %v", err)
 	}
 }
 

@@ -210,7 +210,7 @@ aem_prepend_path() {
 aem_prepend_path "\$AEM_HOME/bin"
 aem_prepend_path "\$AEM_HOME/current/node/bin"
 
-# macOS JDK archives are application bundles whose actual Java home lives in
+# AEM normalizes macOS JDK archives so their Java home is always available at
 # Contents/Home. Keep that stable path even before a JDK is selected: aem use
 # only swaps the current/java link, so the shell sees the new JDK immediately.
 aem_java_home="\$AEM_HOME/current/java"
